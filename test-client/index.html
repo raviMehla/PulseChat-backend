@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Socket Test</title>
+</head>
+<body>
+
+<h2>Socket Test Client</h2>
+
+<input id="userId" placeholder="Enter MongoDB User ID" />
+<input id="chatId" placeholder="Enter Chat ID" />
+<input id="tokenInput" placeholder="Enter JWT Token" />
+<button onclick="connectSocket()">Connect</button>
+
+<hr>
+
+<input id="messageInput" placeholder="Type message" oninput="handleTyping()" />
+<button onclick="sendMessage()">Send</button>
+
+<ul id="messages"></ul>
+<button onclick="markAsRead()">Mark As Read</button>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script>
+  let socket;
+/*
+  function connectSocket() {
+    const userId = document.getElementById("userId").value;
+    const chatId = document.getElementById("chatId").value;
+
+    socket = io("http://localhost:5000");
+
+    socket.on("connect", () => {
+      console.log("Connected to socket:", socket.id);
+    });
+
+    //socket.emit("setup", userId);
+   // socket.emit("join_chat", chatId);
+
+   const token = document.getElementById("tokenInput").value;
+
+socket = io("http://localhost:5000", {
+  auth: {
+    token: token
+  }
+});
+
+
+    socket.on("message_received", (message) => {
+      console.log("Message received:", message);
+
+      const li = document.createElement("li");
+      li.textContent = message.content;
+      document.getElementById("messages").appendChild(li);
+    });
+
+    alert("Connected");
+  }
+*/
+
+function connectSocket() {
+  const chatId = document.getElementById("chatId").value;
+  const token = document.getElementById("tokenInput").value;
+
+  socket = io("http://localhost:5000", {
+    auth: { token }
+  });
+
+  socket.on("connect", () => {
+    console.log("Connected:", socket.id);
+
+    // IMPORTANT — join chat AFTER connect
+    socket.emit("join_chat", chatId);
+  });
+/*
+  socket.on("message_received", (message) => {
+    console.log("Message received:", message);
+
+    const li = document.createElement("li");
+    li.textContent = message.content;
+    document.getElementById("messages").appendChild(li);
+  });
+*/
+
+socket.on("message_received", (message) => {
+  console.log("RECEIVED MESSAGE ID:", message._id);
+
+  const li = document.createElement("li");
+  li.textContent = message.content;
+
+  li.setAttribute("data-id", message._id);
+
+  document.getElementById("messages").appendChild(li);
+});
+
+socket.on("user_online", (userId) => {
+  console.log("User online:", userId);
+});
+
+socket.on("user_offline", (userId) => {
+  console.log("User offline:", userId);
+});
+
+socket.on("typing", (userId) => {
+  console.log("User typing:", userId);
+});
+
+socket.on("stop_typing", (userId) => {
+  console.log("User stopped typing:", userId);
+});
+
+socket.on("messages_read", (data) => {
+  console.log("Messages read by:", data.userId);
+});
+
+socket.on("messages_delivered", (data) => {
+  console.log("Messages delivered to:", data.userId);
+});
+
+socket.on("message_deleted", (data) => {
+  console.log("DELETE EVENT RECEIVED:", data);
+
+  const messageElement = document.querySelector(
+    `[data-id="${data.messageId}"]`
+  );
+
+  console.log("Element found:", messageElement);
+
+  if (messageElement) {
+    messageElement.remove();
+    console.log("Element removed");
+  }
+});
+}
+
+  async function sendMessage() {
+    const content = document.getElementById("messageInput").value;
+    const chatId = document.getElementById("chatId").value;
+    const token = document.getElementById("tokenInput").value;
+
+    const response = await fetch("http://localhost:5000/api/message", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token
+      },
+      body: JSON.stringify({
+        chatId,
+        content
+      })
+    });
+
+    console.log("HTTP Status:", response.status);
+
+    const data = await response.json();
+    console.log("Response:", data);
+  }
+
+  let typingTimeout;
+
+function handleTyping() {
+  const chatId = document.getElementById("chatId").value;
+
+  socket.emit("typing", chatId);
+
+  clearTimeout(typingTimeout);
+
+  typingTimeout = setTimeout(() => {
+    socket.emit("stop_typing", chatId);
+  }, 1000);
+}
+
+async function markAsRead() {
+  const chatId = document.getElementById("chatId").value;
+  const token = document.getElementById("tokenInput").value;
+
+  const response = await fetch("http://localhost:5000/api/message/read", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token
+    },
+    body: JSON.stringify({ chatId })
+  });
+
+  console.log("Read status:", response.status);
+}
+
+</script>
+
+</body>
+</html>
