@@ -1,7 +1,27 @@
 import express from "express";
-import { getProfile } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
-import { saveDeviceToken } from "../controllers/user.controller.js";
+import {
+  updateProfile,
+  updateProfilePic,
+  updatePrivacy,
+  getProfile,
+  saveDeviceToken 
+} from "../controllers/user.controller.js";
+
+import upload from "../middleware/upload.middleware.js";
+
+router.get("/profile", protect, getProfile);
+
+router.put("/profile", protect, updateProfile);
+
+router.put(
+  "/profile-pic",
+  protect,
+  upload.single("profilePic"),
+  updateProfilePic
+);
+
+router.put("/privacy", protect, updatePrivacy);
 
 const router = express.Router();
 

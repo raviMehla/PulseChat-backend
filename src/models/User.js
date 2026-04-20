@@ -56,6 +56,34 @@ const userSchema = new mongoose.Schema(
   type: String,
   default: null
 },
+  bio: {
+  type: String,
+  default: ""
+},
+
+profilePic: {
+  type: String,
+  default: ""
+},
+
+lastSeen: {
+  type: Date,
+  default: Date.now
+},
+
+privacy: {
+  lastSeen: {
+    type: String,
+    enum: ["everyone", "contacts", "nobody"],
+    default: "everyone"
+  },
+  profilePhoto: {
+    type: String,
+    enum: ["everyone", "contacts", "nobody"],
+    default: "everyone"
+  }
+},
+
   },
   { timestamps: true }
 );
