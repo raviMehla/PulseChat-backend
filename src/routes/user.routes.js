@@ -8,7 +8,14 @@ import {
   saveDeviceToken 
 } from "../controllers/user.controller.js";
 
-import upload from "../middleware/upload.middleware.js";
+import {upload} from "../middleware/upload.middleware.js";
+
+
+const router = express.Router();
+
+router.get("/profile", protect, getProfile);
+
+router.post("/device-token", protect, saveDeviceToken);
 
 router.get("/profile", protect, getProfile);
 
@@ -23,10 +30,5 @@ router.put(
 
 router.put("/privacy", protect, updatePrivacy);
 
-const router = express.Router();
-
-router.get("/profile", protect, getProfile);
-
-router.post("/device-token", protect, saveDeviceToken);
 
 export default router;

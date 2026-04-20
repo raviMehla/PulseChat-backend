@@ -1,8 +1,4 @@
-export const getProfile = async (req, res) => {
-  res.status(200).json({
-    user: req.user
-  });
-};
+
 
 export const saveDeviceToken = async (req, res) => {
   try {
