@@ -114,13 +114,8 @@ io.on("connection", async (socket) => {
 
   io.emit("user_online", socket.userId);
   console.log("Emitted user_online");
-/*
-  socket.on("join_chat", (chatId) => {
-    socket.join(chatId);
-    console.log("User joined chat:", chatId);
-  });
-*/
-socket.on("join_chat", async (chatId) => {
+
+  socket.on("join_chat", async (chatId) => {
   socket.join(chatId);
 
   // Mark messages as delivered
@@ -141,7 +136,23 @@ socket.on("join_chat", async (chatId) => {
   });
 
   console.log("User joined chat:", chatId);
-});
+  });
+
+  // 🔥 TYPING START
+  socket.on("typing", ({ chatId }) => {
+  console.log("Typing received:", chatId);
+
+  socket.to(chatId).emit("typing", {
+    userId: socket.userId
+  });
+  });
+
+// 🔥 TYPING STOP
+  socket.on("stop_typing", ({ chatId }) => {
+  socket.to(chatId).emit("stop_typing", {
+    userId: socket.userId
+  });
+  });
 
   socket.on("disconnect", async () => {
     console.log("Socket disconnected:", socket.userId);
@@ -159,14 +170,6 @@ socket.on("join_chat", async (chatId) => {
     io.emit("user_offline", socket.userId);
     console.log("Emitted user_offline");
   });
-
-  socket.on("typing", (chatId) => {
-  socket.to(chatId).emit("typing", socket.userId);
-});
-
-socket.on("stop_typing", (chatId) => {
-  socket.to(chatId).emit("stop_typing", socket.userId);
-});
 
 });
 
