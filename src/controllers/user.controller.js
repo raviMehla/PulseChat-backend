@@ -93,3 +93,14 @@ export const getProfile = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+export const getUserStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select("isOnline lastSeen");
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

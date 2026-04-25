@@ -5,7 +5,8 @@ import {
   updateProfilePic,
   updatePrivacy,
   getProfile,
-  saveDeviceToken 
+  saveDeviceToken,
+  getUserStatus
 } from "../controllers/user.controller.js";
 
 import {upload} from "../middleware/upload.middleware.js";
@@ -20,6 +21,8 @@ router.post("/device-token", protect, saveDeviceToken);
 router.get("/profile", protect, getProfile);
 
 router.put("/profile", protect, updateProfile);
+
+router.get("/status/:id", protect, getUserStatus);
 
 router.put(
   "/profile-pic",
