@@ -16,7 +16,7 @@ import { sendMessageSchema } from "../validators/message.validator.js";
 const router = express.Router();
 
 // POST /api/message
-router.post("/", protect, validate(sendMessageSchema), sendMessage);
+router.post("/", protect, sendMessage);
 
 // PUT /api/message/read
 router.put("/read", protect, markMessagesAsRead);
