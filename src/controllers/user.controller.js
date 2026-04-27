@@ -1,4 +1,4 @@
-
+import User from "../models/User.js";
 
 export const saveDeviceToken = async (req, res) => {
   try {
