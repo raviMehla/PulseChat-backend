@@ -15,6 +15,7 @@ import connectDB from "./config/db.js";
 import jwt from "jsonwebtoken";
 import User from "./models/User.js";
 import Message from "./models/Message.js";
+import Chat from "./models/Chat.js";
 import chatRoutes from "./routes/chat.routes.js";
 import { errorHandler } from "./middleware/error.middleware.js";
 import rateLimit from "express-rate-limit";
@@ -114,6 +115,19 @@ io.on("connection", async (socket) => {
 
   io.emit("user_online", socket.userId);
   console.log("Emitted user_online");
+
+  // 🔥 AUTO-JOIN ARCHITECTURE: 
+  // Fetch all chats where this user is a participant and join the socket to those rooms.
+  // This guarantees io.to(chatId) events (typing, messages) reach them without relying on the frontend.
+  try {
+    const userChats = await Chat.find({ users: socket.userId }).select("_id");
+    userChats.forEach(chat => {
+      socket.join(chat._id.toString());
+    });
+    console.log(`Socket ${socket.userId} auto-joined ${userChats.length} rooms`);
+  } catch (error) {
+    console.error("Failed to auto-join rooms:", error);
+  }
 
   socket.on("join_chat", async (chatId) => {
   socket.join(chatId);
