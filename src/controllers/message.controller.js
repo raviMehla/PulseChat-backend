@@ -139,25 +139,10 @@ const { content, chatId, replyTo } = validation.data;
 
     await chat.save();
 
-    // 5️⃣ Mark delivered (before emit for consistency)
-    const recipientIds = populatedMessage.chat.users
-      .filter(user => user._id.toString() !== req.user._id.toString())
-      .map(user => user._id);
+    // 5️⃣ (Removed fake delivery DB update to support true device-level receipts)
 
-    if (recipientIds.length > 0) {
-      await Message.findByIdAndUpdate(newMessage._id, {
-        $push: { deliveredTo: { $each: recipientIds } }
-      });
-    }
-
-    // 6️⃣ Emit real-time message
+    // 6️⃣ Emit real-time message (ONLY message_received, wait for client receipt for delivery tick)
     io.to(chatId).emit("message_received", populatedMessage);
-
-    io.to(chatId).emit("messages_delivered", {
-      chatId,
-      messageId: newMessage._id,
-      deliveredTo: recipientIds
-    });
 
     // 7️⃣ 🔥 PUSH NOTIFICATION (SAFE BLOCK)
     try {
@@ -192,37 +177,7 @@ const { content, chatId, replyTo } = validation.data;
     res.status(500).json({ message: error.message });
   }
 };
-/*
-export const sendMessage = async (req, res) => {
-  try {
-    const { content, chatId } = req.body;
 
-    if (!content || !chatId) {
-      return res.status(400).json({ message: "Invalid data" });
-    }
-
-    const newMessage = await Message.create({
-      sender: req.user._id,
-      content,
-      chat: chatId
-    });
-
-    const populatedMessage = await Message.findById(newMessage._id)
-      .populate("sender", "name username email")
-      .populate("chat");
-
-    // Update lastMessage in chat
-    await Chat.findByIdAndUpdate(chatId, {
-      lastMessage: populatedMessage._id
-    });
-    io.to(chatId).emit("message_received", populatedMessage);
-    res.status(201).json(populatedMessage);
-
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-*/
 // =====================================
 // MARK MESSAGES AS READ
 // =====================================

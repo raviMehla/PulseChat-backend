@@ -168,6 +168,27 @@ io.on("connection", async (socket) => {
   });
   });
 
+  // ==========================================
+  // 🔥 NEW (Step 2): True Device-Level Delivery Receipt
+  // ==========================================
+  socket.on("message_delivered", async ({ messageId, chatId }) => {
+    try {
+      // 1. Update the database (use $addToSet to prevent duplicate IDs)
+      await Message.findByIdAndUpdate(messageId, {
+        $addToSet: { deliveredTo: socket.userId }
+      });
+
+      // 2. Tell the sender that their message was successfully delivered
+      socket.to(chatId).emit("messages_delivered", {
+        chatId,
+        userId: socket.userId
+      });
+      console.log(`Message ${messageId} physically delivered to user ${socket.userId}`);
+    } catch (err) {
+      console.error("Delivery receipt error:", err.message);
+    }
+  });
+
   socket.on("disconnect", async () => {
     console.log("Socket disconnected:", socket.userId);
 
