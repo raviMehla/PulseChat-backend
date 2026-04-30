@@ -28,6 +28,10 @@ const messageSchema = new mongoose.Schema(
       enum: ["text", "image", "video", "file", "system"],
       default: "text"
     },
+    isDeleted: {
+      type: Boolean,
+      default: false
+    },
 
     fileUrl: {
       type: String,

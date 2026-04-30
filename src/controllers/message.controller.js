@@ -227,61 +227,45 @@ export const markMessagesAsRead = async (req, res) => {
 };
 
 // =====================================
-// PERMANENT DELETE MESSAGE
+// PERMANENT DELETE MESSAGE -> NOW SOFT DELETE
 // =====================================
 export const deleteMessage = async (req, res) => {
   try {
+    // Note: Ensure your Zod validator is checking for messageId
     const { messageId } = req.body;
 
-    if (!messageId) {
-      return res.status(400).json({ message: "MessageId required" });
-    }
+    if (!messageId) return res.status(400).json({ message: "MessageId required" });
 
     const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
 
-    if (!message) {
-      return res.status(404).json({ message: "Message not found" });
-    }
-
-    // ✅ Only sender can delete
+    // ✅ Architecture Rule: Only sender can delete
     if (message.sender.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    // ✅ IMPORTANT RULE: cannot delete if read
-    if (message.readBy && message.readBy.length > 0) {
-      return res.status(400).json({
-        message: "Cannot delete message after it has been read"
-      });
-    }
-
     const chatId = message.chat.toString();
 
-    // ✅ Delete message
-    await Message.findByIdAndDelete(messageId);
+    // 🔥 THE SOFT DELETE MUTATION
+    message.isDeleted = true;
+    message.content = ""; // Wipe content for privacy
+    message.fileUrl = null; // Unlink media
+    message.fileName = null;
+    message.reactions = []; // Clear reactions
+    
+    await message.save();
 
-    // ✅ Update lastMessage
-    const lastMessage = await Message.findOne({ chat: chatId })
-      .sort({ createdAt: -1 });
-
-    await Chat.findByIdAndUpdate(chatId, {
-      lastMessage: lastMessage ? lastMessage._id : null
+    // Realtime emit
+    io.to(chatId).emit("message_deleted", { 
+      messageId: message._id, 
+      chatId 
     });
 
-    // ✅ Realtime emit
-    io.to(chatId).emit("message_deleted", {
-      messageId
-    });
-
-    res.status(200).json({
-      message: "Message deleted successfully"
-    });
-
+    res.status(200).json({ message: "Message deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
-
 // =====================================
 // GET MESSAGES WITH PAGINATION
 // =====================================
