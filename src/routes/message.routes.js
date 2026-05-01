@@ -1,36 +1,48 @@
+
+
 import express from "express";
 import {
   sendMessage,
   markMessagesAsRead,
   deleteMessage,
   getMessages,
-  reactToMessage
+  reactToMessage,
+  sendMediaMessage,
+  searchMessages,      // 🔥 NEW: Imported Search Controller
+  getMessageContext    // 🔥 NEW: Imported Context Controller
 } from "../controllers/message.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { upload } from "../middleware/upload.middleware.js";
-import { sendMediaMessage } from "../controllers/message.controller.js";
-import { validate } from "../middleware/validate.middleware.js";
-import { sendMessageSchema } from "../validators/message.validator.js";
-
+// Note: validate and sendMessageSchema can be used here if you attach them as middleware, 
+// but currently you are doing safeParse inside the controller, which is perfectly fine.
 
 const router = express.Router();
 
-// POST /api/message
+// =====================================
+// POST, PUT, DELETE ROUTES
+// =====================================
+
 router.post("/", protect, sendMessage);
-
-// PUT /api/message/read
 router.put("/read", protect, markMessagesAsRead);
+router.post("/media", protect, upload.single("file"), sendMediaMessage);
+router.post("/react", protect, reactToMessage);
 
-// DELETE /api/message
-router.delete("/", protect, deleteMessage);
+// 🔥 RESTORED FIX: Delete requires the ID in the URL params
+router.delete("/:messageId", protect, deleteMessage);
 
-// GET /api/message/:chatId
+
+// =====================================
+// GET ROUTES (CRITICAL ORDERING)
+// =====================================
+
+// 1. MOST SPECIFIC routes must come first
+router.get("/search/:chatId", protect, searchMessages);
+
+// 2. MULTI-PARAM routes come second
+router.get("/:chatId/context/:messageId", protect, getMessageContext);
+
+// 3. GENERIC catch-all parameter comes LAST
 router.get("/:chatId", protect, getMessages);
 
-// POST /api/message/media
-router.post("/media", protect, upload.single("file"), sendMediaMessage);
-
-// POST /api/message/react
-router.post("/react", protect, reactToMessage);
 
 export default router;

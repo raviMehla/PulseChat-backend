@@ -1,3 +1,6 @@
+
+import { searchMessageSchema } from "../validators/message.validator.js";
+
 import mongoose from "mongoose";
 import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
@@ -7,7 +10,7 @@ import Message from "../models/Message.js";
 import User from "../models/User.js";
 import { io } from "../server.js";
 import admin from "../config/firebase.js";
-import { sendMessageSchema } from "../validators/message.validator.js";
+
 
 // =====================================
 // CREATE OR ACCESS 1-to-1 CHAT
@@ -494,6 +497,112 @@ export const reactToMessage = async (req, res) => {
     });
 
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// SEARCH MESSAGES (CHAT-LEVEL)
+// =====================================
+export const searchMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { query } = req.query;
+
+    // 1. Validate inputs via Zod
+    const validation = searchMessageSchema.safeParse({ chatId, query });
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    // 2. Execute MongoDB Regex Query
+    // We enforce our architectural rules: Only text, not deleted, matching chatId
+    const messages = await Message.find({
+      chat: chatId,
+      isDeleted: false,
+      messageType: "text",
+      content: { $regex: validation.data.query, $options: "i" } // Case-insensitive
+    })
+      .select("_id content createdAt sender") // Lightweight payload
+      .populate("sender", "name username")
+      .sort({ createdAt: -1 }) // Newest matches first
+      .limit(50); // Cap results to prevent memory bloat
+
+    res.status(200).json(messages);
+
+  } catch (error) {
+    console.error("Search Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// GET MESSAGE CONTEXT (DEEP HISTORY JUMP)
+// =====================================
+export const getMessageContext = async (req, res) => {
+  try {
+    const { chatId, messageId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
+
+    // 1. Find the target message to get its timestamp
+    const targetMessage = await Message.findById(messageId)
+      .populate("sender", "name username email")
+      .populate({
+        path: "replyTo",
+        strictPopulate: false,
+        select: "content messageType fileUrl fileName sender isDeleted",
+        populate: { path: "sender", select: "name username" }
+      });
+
+    if (!targetMessage) {
+      return res.status(404).json({ message: "Target message not found" });
+    }
+
+    // 2. Fetch older neighbors (limit 15)
+    const olderMessages = await Message.find({
+      chat: chatId,
+      createdAt: { $lt: targetMessage.createdAt }
+    })
+      .sort({ createdAt: -1 })
+      .limit(15)
+      .populate("sender", "name username email")
+      .populate({
+        path: "replyTo",
+        strictPopulate: false,
+        select: "content messageType fileUrl fileName sender isDeleted",
+        populate: { path: "sender", select: "name username" }
+      });
+
+    // 3. Fetch newer neighbors (limit 15)
+    const newerMessages = await Message.find({
+      chat: chatId,
+      createdAt: { $gt: targetMessage.createdAt }
+    })
+      .sort({ createdAt: 1 })
+      .limit(15)
+      .populate("sender", "name username email")
+      .populate({
+        path: "replyTo",
+        strictPopulate: false,
+        select: "content messageType fileUrl fileName sender isDeleted",
+        populate: { path: "sender", select: "name username" }
+      });
+
+    // 4. Combine and sort chronologically (Oldest -> Newest)
+    // Note: olderMessages comes back newest-first due to sort(-1), so we reverse it
+    const contextSlice = [
+      ...olderMessages.reverse(),
+      targetMessage,
+      ...newerMessages
+    ];
+
+    res.status(200).json(contextSlice);
+
+  } catch (error) {
+    console.error("Context Fetch Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
