@@ -517,15 +517,21 @@ export const searchMessages = async (req, res) => {
 
     // 2. Execute MongoDB Regex Query
     // We enforce our architectural rules: Only text, not deleted, matching chatId
+    // 2. Execute MongoDB Regex Query
     const messages = await Message.find({
       chat: chatId,
       isDeleted: false,
-      messageType: "text",
-      content: { $regex: validation.data.query, $options: "i" } // Case-insensitive
+      // 🔥 FIX: Match "text" OR missing messageType for backward compatibility
+      $or: [
+        { messageType: "text" },
+        { messageType: { $exists: false } },
+        { messageType: null }
+      ],
+      content: { $regex: validation.data.query, $options: "i" }
     })
-      .select("_id content createdAt sender") // Lightweight payload
+      .select("_id content createdAt sender") 
       .populate("sender", "name username")
-      .sort({ createdAt: -1 }) // Newest matches first
+      .sort({ createdAt: -1 }) 
       .limit(50); // Cap results to prevent memory bloat
 
     res.status(200).json(messages);
