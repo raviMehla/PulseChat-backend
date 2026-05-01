@@ -520,7 +520,7 @@ export const searchMessages = async (req, res) => {
     // 2. Execute MongoDB Regex Query
     const messages = await Message.find({
       chat: chatId,
-      isDeleted: false,
+      isDeleted: { $ne: true },
       // 🔥 FIX: Match "text" OR missing messageType for backward compatibility
       $or: [
         { messageType: "text" },
