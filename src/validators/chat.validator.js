@@ -15,3 +15,17 @@ export const searchUserSchema = z.object({
     .min(1, "Search query cannot be empty")
     .max(50, "Search query is too long")
 });
+
+export const renameGroupSchema = z.object({
+  chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format"),
+  newName: z.string().min(1, "Group name cannot be empty").max(50, "Group name is too long")
+});
+
+export const groupMembershipSchema = z.object({
+  chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format"),
+  userId: z.string().regex(objectIdRegex, "Invalid User ID format")
+});
+
+export const leaveGroupSchema = z.object({
+  chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format")
+});
