@@ -1,5 +1,5 @@
 
-import { searchMessageSchema } from "../validators/message.validator.js";
+import { searchMessageSchema, sendMessageSchema } from "../validators/message.validator.js";
 
 import mongoose from "mongoose";
 import cloudinary from "../config/cloudinary.js";
