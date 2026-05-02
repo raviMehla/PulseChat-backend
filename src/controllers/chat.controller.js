@@ -7,7 +7,7 @@ import {
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
-import { io } from "../server.js";
+import { getIO } from "../socket.js";
 
 // =====================================
 // SYSTEM MESSAGE GENERATOR
@@ -20,6 +20,7 @@ const createSystemMessage = async (chatId, text) => {
   });
 
   const populated = await Message.findById(message._id).populate("chat");
+  const io = getIO();
   io.to(chatId).emit("message_received", populated);
 };
 
@@ -139,6 +140,7 @@ export const renameGroup = async (req, res) => {
 
     await createSystemMessage(chatId, `${req.user.name} renamed group to "${newName}"`);
     
+    const io = getIO();
     io.to(chatId).emit("group_updated", chat);
     res.status(200).json(chat);
 
@@ -170,7 +172,7 @@ export const addToGroup = async (req, res) => {
     await createSystemMessage(chatId, `${req.user.name} added ${addedUser.name}`);
 
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
-    
+    const io = getIO();
     io.to(chatId).emit("group_updated", updatedChat);
     res.status(200).json(updatedChat);
 
@@ -204,6 +206,7 @@ export const removeFromGroup = async (req, res) => {
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
 
     // Emit group update to everyone, and a specific kick event to the removed user
+    const io = getIO();
     io.to(chatId).emit("group_updated", updatedChat);
     io.to(userId).emit("kicked_from_group", { chatId });
 
@@ -252,6 +255,7 @@ export const leaveGroup = async (req, res) => {
     await createSystemMessage(chatId, `${req.user.name} left the group`);
 
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
+    const io = getIO();
     io.to(chatId).emit("group_updated", updatedChat);
 
     res.status(200).json({ message: "Left group successfully" });
