@@ -91,6 +91,7 @@ app.use("/api/message", messageRoutes);
 
 
 
+
 // Basic Route (Health Check)
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -98,6 +99,7 @@ app.get("/", (req, res) => {
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME
   });
 });
+
 
 io.on("connection", async (socket) => {
   console.log("Authenticated socket:", socket.userId);

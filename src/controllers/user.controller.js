@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import { searchUserSchema } from "../validators/chat.validator.js";
 
 export const saveDeviceToken = async (req, res) => {
   try {
@@ -102,5 +103,42 @@ export const getUserStatus = async (req, res) => {
     res.json(user);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// =====================================
+// SEARCH USERS
+// =====================================
+export const searchUsers = async (req, res) => {
+  try {
+    // 1. Zod Validation for the query parameter
+    const validation = searchUserSchema.safeParse(req.query);
+    
+    if (!validation.success) {
+      return res.status(400).json({ 
+        message: validation.error.issues[0].message 
+      });
+    }
+
+    const keyword = validation.data.search;
+
+    // 2. MongoDB $regex Search (Case-insensitive)
+    // We search by name or email, and strictly exclude the requesting user
+    const users = await User.find({
+      _id: { $ne: req.user._id },
+      $or: [
+        { name: { $regex: keyword, $options: "i" } },
+        { email: { $regex: keyword, $options: "i" } },
+        { username: { $regex: keyword, $options: "i" } } // Include if your schema uses username
+      ]
+    })
+      .select("-password") // Never send passwords to the client
+      .limit(20); // Cap the results to prevent massive payloads
+
+    res.status(200).json(users);
+
+  } catch (error) {
+    console.error("User Search Error:", error);
+    res.status(500).json({ message: "Internal server error during user search" });
   }
 };

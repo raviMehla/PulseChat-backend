@@ -1,3 +1,4 @@
+import { createGroupSchema } from "../validators/chat.validator.js";
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
@@ -243,37 +244,58 @@ export const removeFromGroup = async (req, res) => {
 
 export const createGroupChat = async (req, res) => {
   try {
-    const { name, users } = req.body;
-
-    if (!name || !users || users.length < 2) {
-      return res.status(400).json({
-        message: "Group requires name and at least 2 users"
+    // 1. Zod Validation
+    const validation = createGroupSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ 
+        message: validation.error.issues[0].message 
       });
     }
 
+    const { name, users } = validation.data;
+
+    // 2. Data Sanitization: Prevent duplicate users and self-addition
+    // Convert all incoming IDs to strings, filter out the creator, and use Set for uniqueness
+    const creatorId = req.user._id.toString();
+    const uniqueParticipants = Array.from(
+      new Set(users.filter(id => id !== creatorId))
+    );
+
+    if (uniqueParticipants.length < 1) {
+      return res.status(400).json({ 
+        message: "Group requires at least one other participant" 
+      });
+    }
+
+    // 3. Add the creator to the final array
+    uniqueParticipants.push(creatorId);
+
+    // 4. Create the Group
     const group = await Chat.create({
       chatName: name,
       isGroup: true,
-      users: [...users, req.user._id],
-      groupAdmin: req.user._id
+      users: uniqueParticipants,
+      groupAdmin: creatorId
     });
 
+    // 5. Populate Data for the Frontend
     const fullGroup = await Chat.findById(group._id)
       .populate("users", "-password")
       .populate("groupAdmin", "-password");
 
+    // 6. Generate System Message (Historical Anchor)
     await createSystemMessage(
       group._id,
-      `${req.user.name} created the group`
+      `${req.user.name} created the group "${name}"`
     );
 
     res.status(201).json(fullGroup);
 
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Create Group Error:", error);
+    res.status(500).json({ message: "Internal server error during group creation" });
   }
 };
-
 // =====================================
 // RENAME GROUP CHAT
 // =====================================

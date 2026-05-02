@@ -6,7 +6,8 @@ import {
   updatePrivacy,
   getProfile,
   saveDeviceToken,
-  getUserStatus
+  getUserStatus,
+  searchUsers
 } from "../controllers/user.controller.js";
 
 import {upload} from "../middleware/upload.middleware.js";
@@ -32,6 +33,12 @@ router.put(
 );
 
 router.put("/privacy", protect, updatePrivacy);
+
+// Route to search for users (e.g., /api/users/search?search=john)
+router.get("/search", protect, searchUsers);
+
+// Route to get a specific user's status
+router.get("/status/:userId", protect, getUserStatus);
 
 
 export default router;
