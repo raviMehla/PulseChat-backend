@@ -1,5 +1,6 @@
 import User from "../models/User.js";
 import { searchUserSchema } from "../validators/chat.validator.js";
+import { fcmTokenSchema } from "../validators/user.validator.js";
 
 export const saveDeviceToken = async (req, res) => {
   try {
@@ -140,5 +141,30 @@ export const searchUsers = async (req, res) => {
   } catch (error) {
     console.error("User Search Error:", error);
     res.status(500).json({ message: "Internal server error during user search" });
+  }
+};
+
+// =====================================
+// REGISTER FCM TOKEN
+// =====================================  
+export const registerFcmToken = async (req, res) => {
+  try {
+    const validation = fcmTokenSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    const { token } = validation.data;
+
+    // Use $addToSet to prevent duplicate tokens if the user logs in from the same browser twice
+    await User.findByIdAndUpdate(
+      req.user._id,
+      { $addToSet: { fcmTokens: token } }
+    );
+
+    res.status(200).json({ message: "FCM Token registered successfully" });
+  } catch (error) {
+    console.error("FCM Token Registration Error:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };

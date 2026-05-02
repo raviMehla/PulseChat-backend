@@ -7,7 +7,8 @@ import {
   getProfile,
   saveDeviceToken,
   getUserStatus,
-  searchUsers
+  searchUsers,
+  registerFcmToken
 } from "../controllers/user.controller.js";
 
 import {upload} from "../middleware/upload.middleware.js";
@@ -40,5 +41,7 @@ router.get("/search", protect, searchUsers);
 // Route to get a specific user's status
 router.get("/status/:userId", protect, getUserStatus);
 
+// Add this with your other routes
+router.post("/fcm-token", protect, registerFcmToken);
 
 export default router;

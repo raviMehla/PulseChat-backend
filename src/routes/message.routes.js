@@ -1,6 +1,6 @@
-
-
 import express from "express";
+import { protect } from "../middleware/auth.middleware.js";
+import { upload } from "../middleware/upload.middleware.js";
 import {
   sendMessage,
   markMessagesAsRead,
@@ -8,41 +8,39 @@ import {
   getMessages,
   reactToMessage,
   sendMediaMessage,
-  searchMessages,      // 🔥 NEW: Imported Search Controller
-  getMessageContext    // 🔥 NEW: Imported Context Controller
+  searchMessages,
+  getMessageContext
 } from "../controllers/message.controller.js";
-import { protect } from "../middleware/auth.middleware.js";
-import { upload } from "../middleware/upload.middleware.js";
-// Note: validate and sendMessageSchema can be used here if you attach them as middleware, 
-// but currently you are doing safeParse inside the controller, which is perfectly fine.
 
 const router = express.Router();
 
 // =====================================
-// POST, PUT, DELETE ROUTES
+// CREATION & MEDIA (POST)
 // =====================================
-
 router.post("/", protect, sendMessage);
-router.put("/read", protect, markMessagesAsRead);
 router.post("/media", protect, upload.single("file"), sendMediaMessage);
-router.post("/react", protect, reactToMessage);
 
-// 🔥 RESTORED FIX: Delete requires the ID in the URL params
+// =====================================
+// MUTATIONS & UPDATES (PUT / DELETE)
+// =====================================
+router.put("/read", protect, markMessagesAsRead);
+router.put("/react", protect, reactToMessage); // Changed to PUT: Updating an existing entity
+
+// 🔥 CRITICAL: Since you are using a URL param, your controller MUST read req.params.messageId
 router.delete("/:messageId", protect, deleteMessage);
 
-
 // =====================================
-// GET ROUTES (CRITICAL ORDERING)
+// FETCHING & QUERIES (GET)
+// 🚨 CRITICAL ORDERING: Specific paths before generic parameters
 // =====================================
 
-// 1. MOST SPECIFIC routes must come first
-router.get("/search/:chatId", protect, searchMessages);
+// 1. Specific Search Route (Standardized to RESTful nested formatting)
+router.get("/:chatId/search", protect, searchMessages);
 
-// 2. MULTI-PARAM routes come second
+// 2. Specific Deep History / Context Route
 router.get("/:chatId/context/:messageId", protect, getMessageContext);
 
-// 3. GENERIC catch-all parameter comes LAST
+// 3. Generic Fetch Route (Must remain at the very bottom)
 router.get("/:chatId", protect, getMessages);
-
 
 export default router;
