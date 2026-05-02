@@ -4,7 +4,7 @@ import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
-import { io } from "../server.js";
+import { getIO } from "../socket.js";
 import { sendPushNotification } from "../services/notification.service.js"; // 🔥 Import the new service
 
 // =====================================
@@ -53,6 +53,7 @@ export const sendMessage = async (req, res) => {
     await chat.save();
 
     // 🔥 Real-time emit
+    const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
 
     // 🔥 Abstracted Service Call
@@ -125,6 +126,7 @@ export const sendMediaMessage = async (req, res) => {
     });
     await chat.save();
 
+    const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
 
     // 🔥 Abstracted Service Call
@@ -155,6 +157,7 @@ export const markMessagesAsRead = async (req, res) => {
       await chat.save();
     }
 
+    const io = getIO();
     io.to(chatId).emit("messages_read", { chatId, userId: req.user._id });
     res.status(200).json({ message: "Messages marked as read" });
   } catch (error) {
@@ -167,8 +170,10 @@ export const markMessagesAsRead = async (req, res) => {
 // =====================================
 export const deleteMessage = async (req, res) => {
   try {
-    const { messageId } = req.body;
-    if (!messageId) return res.status(400).json({ message: "MessageId required" });
+    // 🔥 ARCHITECTURAL FIX: Extract from req.params to match the router (/:messageId)
+    const { messageId } = req.params;
+    
+    if (!messageId) return res.status(400).json({ message: "MessageId required in URL parameters" });
 
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
@@ -187,6 +192,7 @@ export const deleteMessage = async (req, res) => {
     
     await message.save();
 
+    const io = getIO();
     io.to(chatId).emit("message_deleted", { messageId: message._id, chatId });
     res.status(200).json({ message: "Message deleted successfully" });
   } catch (error) {
@@ -255,7 +261,7 @@ export const reactToMessage = async (req, res) => {
     }
 
     await message.save();
-
+    const io = getIO();
     io.to(message.chat.toString()).emit("message_reacted", {
       messageId,
       reactions: message.reactions
