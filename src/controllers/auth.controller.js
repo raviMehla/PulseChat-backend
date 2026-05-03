@@ -11,10 +11,11 @@ export const registerUser = async (req, res) => {
     const validation = registerSchema.safeParse(req.body);
 
     if (!validation.success) {
-      return res.status(400).json({
-        message: validation.error.errors[0].message
-      });
-    }
+  // 🛡️ FIX: Use .issues for standard Zod compatibility and added safety
+  return res.status(400).json({
+    message: validation.error.issues[0]?.message || "Invalid input data"
+  });
+}
     const { name, username, email, password, phone } = validation.data;
 
     // Check existing user
