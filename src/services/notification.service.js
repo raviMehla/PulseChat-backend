@@ -11,7 +11,7 @@ export const sendPushNotification = async (chat, sender, content, messageType = 
   try {
     // 1. Filter out the sender from receivers
     const receivers = chat.users.filter(
-      (u) => u._id.toString() !== sender._id.toString()
+      (u) => String(u._id) !== String(sender._id)
     );
 
     // 2. Flatten and deduplicate tokens
@@ -33,20 +33,24 @@ export const sendPushNotification = async (chat, sender, content, messageType = 
         body: bodyText,
       },
       data: {
-        chatId: chat._id.toString(),
+        chatId: String(chat._id),
         type: "new_message",
       },
       tokens: tokens,
     };
 
-    // 5. Fire and Forget
-    admin.messaging().sendEachForMulticast(payload)
-      .then(res => {
-        if (res.failureCount > 0) {
-          console.warn(`FCM: ${res.failureCount} tokens failed delivery.`);
-        }
-      })
-      .catch(err => console.error("FCM Delivery Error:", err));
+    // 5. Fire and Forget (🛡️ FIX: Used legacy sendMulticast for v10 and below compatibility)
+    if (admin.messaging && typeof admin.messaging().sendMulticast === 'function') {
+      admin.messaging().sendMulticast(payload)
+        .then(res => {
+          if (res.failureCount > 0) {
+            console.warn(`FCM: ${res.failureCount} tokens failed delivery.`);
+          }
+        })
+        .catch(err => console.error("FCM Delivery Error:", err));
+    } else {
+      console.warn("FCM SDK Warning: sendMulticast method not found. Ensure firebase-admin is correctly configured.");
+    }
 
   } catch (error) {
     console.error("Notification Service Error:", error);

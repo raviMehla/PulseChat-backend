@@ -19,13 +19,20 @@ export const initializeSocket = (server) => {
   // ==========================================
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
-    if (!token) return next(new Error("Authentication error"));
+    if (!token) {
+      console.warn("Socket connection rejected: No token provided.");
+      return next(new Error("Authentication error"));
+    }
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.id;
+      // 🛡️ FIX: Agnostic ID parsing to prevent undefined userId crashes
+      socket.userId = decoded.id || decoded.userId || decoded._id;
+      
+      if (!socket.userId) throw new Error("Malformed JWT payload");
       next();
     } catch (err) {
+      console.error("Socket authentication failed:", err.message);
       next(new Error("Invalid token"));
     }
   });
@@ -40,20 +47,23 @@ export const initializeSocket = (server) => {
   // CONNECTION LOGIC
   // ==========================================
   io.on("connection", async (socket) => {
-    console.log("Authenticated socket:", socket.userId);
-    socket.join(socket.userId);
+    console.log("🟢 Authenticated socket connected:", socket.userId);
+    
+    // Join a personal room for direct user-to-user events (like getting kicked from a group)
+    socket.join(String(socket.userId));
 
+    // Broadcast online status to everyone
     try {
       await User.findByIdAndUpdate(socket.userId, { isOnline: true });
+      io.emit("user_online", String(socket.userId));
     } catch (err) {
-      console.log("Online update error:", err.message);
+      console.error("Online status update error:", err.message);
     }
-    io.emit("user_online", socket.userId);
 
     // 🔥 AUTO-JOIN ARCHITECTURE
     try {
       const userChats = await Chat.find({ users: socket.userId }).select("_id");
-      userChats.forEach(chat => socket.join(chat._id.toString()));
+      userChats.forEach(chat => socket.join(String(chat._id)));
     } catch (error) {
       console.error("Failed to auto-join rooms:", error);
     }
@@ -62,27 +72,37 @@ export const initializeSocket = (server) => {
     // EVENT LISTENERS
     // ─────────────────────────────────────────────
     socket.on("join_chat", async (chatId) => {
-      socket.join(chatId);
-      await Message.updateMany(
-        { chat: chatId, sender: { $ne: socket.userId }, deliveredTo: { $ne: socket.userId } },
-        { $push: { deliveredTo: socket.userId } }
-      );
-      io.to(chatId).emit("messages_delivered", { chatId, userId: socket.userId });
+      if (!chatId) return;
+      const safeChatId = String(chatId);
+      socket.join(safeChatId);
+      
+      try {
+        await Message.updateMany(
+          { chat: safeChatId, sender: { $ne: socket.userId }, deliveredTo: { $ne: socket.userId } },
+          { $push: { deliveredTo: socket.userId } }
+        );
+        io.to(safeChatId).emit("messages_delivered", { chatId: safeChatId, userId: String(socket.userId) });
+      } catch (err) {
+        console.error("Join chat delivery update error:", err.message);
+      }
     });
 
     socket.on("typing", ({ chatId }) => {
+      if (!chatId) return;
       const now = Date.now();
       const lastTyped = typingCooldowns.get(socket.id) || 0;
       if (now - lastTyped < 1000) return; 
       typingCooldowns.set(socket.id, now);
-      socket.to(chatId).emit("typing", { userId: socket.userId });
+      socket.to(String(chatId)).emit("typing", { userId: String(socket.userId) });
     });
 
     socket.on("stop_typing", ({ chatId }) => {
-      socket.to(chatId).emit("stop_typing", { userId: socket.userId });
+      if (!chatId) return;
+      socket.to(String(chatId)).emit("stop_typing", { userId: String(socket.userId) });
     });
 
     socket.on("message_delivered", async ({ messageId, chatId }) => {
+      if (!messageId || !chatId) return;
       const now = Date.now();
       const lastDelivered = deliveryCooldowns.get(socket.id) || 0;
       if (now - lastDelivered < 300) return; 
@@ -92,7 +112,7 @@ export const initializeSocket = (server) => {
         await Message.findByIdAndUpdate(messageId, {
           $addToSet: { deliveredTo: socket.userId }
         });
-        socket.to(chatId).emit("messages_delivered", { chatId, userId: socket.userId });
+        socket.to(String(chatId)).emit("messages_delivered", { chatId: String(chatId), userId: String(socket.userId) });
       } catch (err) {
         console.error("Delivery receipt error:", err.message);
       }
@@ -100,16 +120,16 @@ export const initializeSocket = (server) => {
 
     // 🔥 DISCONNECT & MEMORY CLEANUP
     socket.on("disconnect", async () => {
-      console.log("Socket disconnected:", socket.userId);
+      console.log("🔴 Socket disconnected:", socket.userId);
       typingCooldowns.delete(socket.id);
       deliveryCooldowns.delete(socket.id);
 
       try {
         await User.findByIdAndUpdate(socket.userId, { isOnline: false, lastSeen: new Date() });
+        io.emit("user_offline", String(socket.userId));
       } catch (err) {
-        console.log("Offline update error:", err.message);
+        console.error("Offline update error:", err.message);
       }
-      io.emit("user_offline", socket.userId);
     });
   });
 };

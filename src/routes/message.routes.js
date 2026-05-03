@@ -1,7 +1,7 @@
 import express from "express";
 import { protect } from "../middleware/auth.middleware.js";
 import { upload } from "../middleware/upload.middleware.js";
-import { messageLimiter, heavyTaskLimiter } from "../middleware/rateLimit.middleware.js"; // 🔥 NEW: Security Middleware
+import { messageLimiter, heavyTaskLimiter } from "../middleware/rateLimit.middleware.js";
 import {
   sendMessage,
   markMessagesAsRead,
@@ -33,22 +33,21 @@ router.put("/read", protect, markMessagesAsRead);
 // will be handled efficiently via Socket.IO cooldowns in Phase 2.
 router.put("/react", protect, reactToMessage); 
 
-// 🔥 CRITICAL: Since you are using a URL param, your controller MUST read req.params.messageId
+// 🔥 CRITICAL: Deletion Route
 router.delete("/:messageId", protect, deleteMessage);
 
 // =====================================
 // FETCHING & QUERIES (GET)
-// 🚨 CRITICAL ORDERING: Specific paths before generic parameters
+// 🚨 CRITICAL ORDERING: Static prefixes must go BEFORE generic /:chatId parameters
 // =====================================
 
-// 1. Specific Search Route (Standardized to RESTful nested formatting)
-// 🛡️ Protected against database CPU exhaustion via regex spam
-router.get("/:chatId/search", protect, heavyTaskLimiter, searchMessages);
+// 1. 🛡️ SEARCH FIX: Matches the frontend GET /api/message/search/:chatId
+router.get("/search/:chatId", protect, heavyTaskLimiter, searchMessages);
 
-// 2. Specific Deep History / Context Route
-router.get("/:chatId/context/:messageId", protect, getMessageContext);
+// 2. CONTEXT FIX: Matches frontend context fetch
+router.get("/context/:chatId/:messageId", protect, getMessageContext);
 
-// 3. Generic Fetch Route (Must remain at the very bottom)
+// 3. Generic Fetch Route (Must remain at the very bottom so it doesn't hijack /search)
 router.get("/:chatId", protect, getMessages);
 
 export default router;
