@@ -32,7 +32,12 @@ const chatSchema = new mongoose.Schema(
   type: Map,
   of: Number,
   default: {}
-}
+},
+  // 🟢 Phase 2: Group Invites
+  pendingMembers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  }],
   },
   { timestamps: true }
 );

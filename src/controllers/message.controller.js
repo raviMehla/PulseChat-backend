@@ -4,8 +4,9 @@ import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
+import User from "../models/User.js"; // 🔥 Imported User for privacy checks
 import { getIO } from "../socket.js";
-import { sendPushNotification } from "../services/notification.service.js"; // 🔥 Import the new service
+import { sendPushNotification } from "../services/notification.service.js";
 
 // =====================================
 // SEND TEXT MESSAGE
@@ -18,10 +19,36 @@ export const sendMessage = async (req, res) => {
     }
 
     const { content, chatId, replyTo } = validation.data;
+    const senderId = req.user._id;
+
+    // 1️⃣ Fetch the Chat context to verify users
+    const chatContext = await Chat.findById(chatId);
+    if (!chatContext) return res.status(404).json({ message: "Chat not found" });
+
+    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Check Block Status (1-on-1 Chats Only)
+    if (!chatContext.isGroup) {
+      const receiverId = chatContext.users.find(u => String(u) !== String(senderId));
+      
+      if (receiverId) {
+        // Fetch both users concurrently for performance
+        const [sender, receiver] = await Promise.all([
+          User.findById(senderId).select("blockedUsers"),
+          User.findById(receiverId).select("blockedUsers")
+        ]);
+
+        if (sender.blockedUsers.includes(receiverId)) {
+          return res.status(403).json({ message: "You have blocked this user. Unblock them to send a message." });
+        }
+        if (receiver.blockedUsers.includes(senderId)) {
+          return res.status(403).json({ message: "Cannot send messages to this user at this time." });
+        }
+      }
+    }
+
     let safeReplyTo = (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) ? replyTo : null;
 
     const newMessage = await Message.create({
-      sender: req.user._id,
+      sender: senderId,
       content,
       chat: chatId,
       replyTo: safeReplyTo
@@ -72,7 +99,32 @@ export const sendMessage = async (req, res) => {
 export const sendMediaMessage = async (req, res) => {
   try {
     const { chatId, replyTo } = req.body;
+    const senderId = req.user._id;
+
     if (!req.file || !chatId) return res.status(400).json({ message: "File and chatId are required" });
+
+    // 1️⃣ Fetch the Chat context
+    const chatContext = await Chat.findById(chatId);
+    if (!chatContext) return res.status(404).json({ message: "Chat not found" });
+
+    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE Cloudinary upload to save bandwidth
+    if (!chatContext.isGroup) {
+      const receiverId = chatContext.users.find(u => String(u) !== String(senderId));
+      
+      if (receiverId) {
+        const [sender, receiver] = await Promise.all([
+          User.findById(senderId).select("blockedUsers"),
+          User.findById(receiverId).select("blockedUsers")
+        ]);
+
+        if (sender.blockedUsers.includes(receiverId)) {
+          return res.status(403).json({ message: "You have blocked this user. Unblock them to send a message." });
+        }
+        if (receiver.blockedUsers.includes(senderId)) {
+          return res.status(403).json({ message: "Cannot send messages to this user at this time." });
+        }
+      }
+    }
 
     let messageType = "file";
     if (req.file.mimetype.startsWith("image")) messageType = "image";
@@ -94,7 +146,7 @@ export const sendMediaMessage = async (req, res) => {
     let safeReplyTo = (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) ? replyTo : null;
 
     const newMessage = await Message.create({
-      sender: req.user._id,
+      sender: senderId,
       chat: chatId,
       messageType,
       fileUrl: result.secure_url,
@@ -170,7 +222,6 @@ export const markMessagesAsRead = async (req, res) => {
 // =====================================
 export const deleteMessage = async (req, res) => {
   try {
-    // 🔥 ARCHITECTURAL FIX: Extract from req.params to match the router (/:messageId)
     const { messageId } = req.params;
     
     if (!messageId) return res.status(400).json({ message: "MessageId required in URL parameters" });

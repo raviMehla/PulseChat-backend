@@ -1,9 +1,10 @@
-import jwt from "jsonwebtoken";
+import jwt from 'jsonwebtoken';
 
-export const generateToken = (userId) => {
+// Add tokenVersion as the second parameter
+export const generateToken = (id, tokenVersion = 0) => {
   return jwt.sign(
-    { id: userId },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
+    { id, tokenVersion }, // Inject it into the payload
+    process.env.JWT_SECRET, 
+    { expiresIn: '30d' }
   );
 };

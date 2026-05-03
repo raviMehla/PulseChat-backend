@@ -1,47 +1,63 @@
 import express from "express";
 import { protect } from "../middleware/auth.middleware.js";
+import { upload } from "../middleware/upload.middleware.js";
+
 import {
-  updateProfile,
+  getProfile,
+  updateProfile,  
   updateProfilePic,
   updatePrivacy,
-  getProfile,
-  saveDeviceToken,
+  updatePassword,
+  logoutAllDevices,
+  toggleBlockUser,
   getUserStatus,
   searchUsers,
-  registerFcmToken
+  saveDeviceToken,
+  registerFcmToken,
+  exportUserData, requestDeleteOtp, deleteAccount
 } from "../controllers/user.controller.js";
-
-import {upload} from "../middleware/upload.middleware.js";
-
 
 const router = express.Router();
 
-router.get("/profile", protect, getProfile);
+// ==========================================
+// GLOBAL MIDDLEWARE
+// ==========================================
+// Enforce authentication for ALL routes in this file
+router.use(protect);
 
-router.post("/device-token", protect, saveDeviceToken);
+// ==========================================
+// PROFILE MANAGEMENT
+// ==========================================
+router.get("/profile", getProfile);
+router.put("/profile", updateProfile);
+router.put("/profile-pic", upload.single("profilePic"), updateProfilePic);
 
-router.get("/profile", protect, getProfile);
+// ==========================================
+// PRIVACY & SECURITY (Phase 2 & 3)
+// ==========================================
+router.put("/privacy", updatePrivacy);
+router.put("/password", updatePassword);
+router.post("/logout-all", logoutAllDevices);
+router.put("/block/:targetUserId", toggleBlockUser);
 
-router.put("/profile", protect, updateProfile);
+// ==========================================
+// USER DISCOVERY & STATUS
+// ==========================================
+// Note: Put /search before /status/:id so Express doesn't treat "search" as an ID
+router.get("/search", searchUsers);
+router.get("/status/:id", getUserStatus);
 
-router.get("/status/:id", protect, getUserStatus);
+// ==========================================
+// DEVICE & PUSH NOTIFICATIONS
+// ==========================================
+router.post("/device-token", saveDeviceToken);
+router.post("/fcm-token", registerFcmToken);
 
-router.put(
-  "/profile-pic",
-  protect,
-  upload.single("profilePic"),
-  updateProfilePic
-);
-
-router.put("/privacy", protect, updatePrivacy);
-
-// Route to search for users (e.g., /api/users/search?search=john)
-router.get("/search", protect, searchUsers);
-
-// Route to get a specific user's status
-router.get("/status/:userId", protect, getUserStatus);
-
-// Add this with your other routes
-router.post("/fcm-token", protect, registerFcmToken);
+// ==========================================
+// ADVANCED SETTINGS (Backup & Deletion)
+// ==========================================
+router.get("/export-data", exportUserData);
+router.post("/delete-account/otp", requestDeleteOtp);
+router.delete("/delete-account", deleteAccount);
 
 export default router;

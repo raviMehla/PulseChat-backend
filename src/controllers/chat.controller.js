@@ -34,6 +34,7 @@ export const accessChat = async (req, res) => {
     if (!userId) return res.status(400).json({ message: "UserId is required" });
     if (userId === req.user._id.toString()) return res.status(400).json({ message: "Cannot chat with yourself" });
 
+    // 1️⃣ Check if chat already exists
     let chat = await Chat.findOne({
       isGroup: false,
       users: { $all: [req.user._id, userId] }
@@ -43,6 +44,20 @@ export const accessChat = async (req, res) => {
 
     if (chat) return res.status(200).json(chat);
 
+    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Prevent creating a new chat if blocked
+    const [sender, receiver] = await Promise.all([
+      User.findById(req.user._id).select("blockedUsers"),
+      User.findById(userId).select("blockedUsers")
+    ]);
+
+    if (sender.blockedUsers.includes(userId)) {
+      return res.status(403).json({ message: "You have blocked this user. Unblock to initiate a chat." });
+    }
+    if (receiver.blockedUsers.includes(req.user._id)) {
+      return res.status(403).json({ message: "Cannot initiate chat with this user at this time." });
+    }
+
+    // 3️⃣ Create the new chat
     const newChat = await Chat.create({
       isGroup: false,
       users: [req.user._id, userId]
@@ -98,6 +113,24 @@ export const createGroupChat = async (req, res) => {
       return res.status(400).json({ message: "Group requires at least one other participant" });
     }
 
+    // 🛡️ PRIVACY ENFORCEMENT: Validate block status before creating the group
+    const adminUser = await User.findById(creatorId).select("blockedUsers");
+    const targetUsers = await User.find({ _id: { $in: uniqueParticipants } }).select("blockedUsers");
+
+    for (const targetUser of targetUsers) {
+      if (adminUser.blockedUsers.includes(targetUser._id)) {
+        return res.status(403).json({ 
+          message: "You cannot add a user you have blocked to a group." 
+        });
+      }
+      if (targetUser.blockedUsers.includes(creatorId)) {
+        return res.status(403).json({ 
+          message: "You do not have permission to add one or more selected users to a group." 
+        });
+      }
+    }
+
+    // Validation passed, add admin to the participants array
     uniqueParticipants.push(creatorId);
 
     const group = await Chat.create({
@@ -158,12 +191,27 @@ export const addToGroup = async (req, res) => {
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
     const { chatId, userId } = validation.data;
+    const adminId = req.user._id;
+
     const chat = await Chat.findById(chatId);
 
     if (!chat) return res.status(404).json({ message: "Chat not found" });
     if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
-    if (chat.groupAdmin.toString() !== req.user._id.toString()) return res.status(403).json({ message: "Only admin can add" });
+    if (chat.groupAdmin.toString() !== adminId.toString()) return res.status(403).json({ message: "Only admin can add" });
     if (chat.users.includes(userId)) return res.status(400).json({ message: "User already in group" });
+
+    // 🛡️ PRIVACY ENFORCEMENT: Block Check
+    const [adminUser, targetUser] = await Promise.all([
+      User.findById(adminId).select("blockedUsers"),
+      User.findById(userId).select("blockedUsers")
+    ]);
+
+    if (adminUser.blockedUsers.includes(userId)) {
+      return res.status(403).json({ message: "You cannot add a user you have blocked." });
+    }
+    if (targetUser.blockedUsers.includes(adminId)) {
+      return res.status(403).json({ message: "You do not have permission to add this user." });
+    }
 
     chat.users.push(userId);
     await chat.save();

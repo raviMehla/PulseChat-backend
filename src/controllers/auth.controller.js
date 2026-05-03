@@ -8,15 +8,14 @@ import { generateToken } from "../services/token.service.js";
 // ==========================
 export const registerUser = async (req, res) => {
   try {
+    const validation = registerSchema.safeParse(req.body);
 
-   const validation = registerSchema.safeParse(req.body);
-
-if (!validation.success) {
-  return res.status(400).json({
-    message: validation.error.errors[0].message
-  });
-}
-const { name, username, email, password, phone } = validation.data;
+    if (!validation.success) {
+      return res.status(400).json({
+        message: validation.error.errors[0].message
+      });
+    }
+    const { name, username, email, password, phone } = validation.data;
 
     // Check existing user
     const existingUser = await User.findOne({
@@ -35,9 +34,11 @@ const { name, username, email, password, phone } = validation.data;
       email,
       password: hashedPassword,
       phone
+      // tokenVersion defaults to 0 via our updated Mongoose schema
     });
 
-    const token = generateToken(user._id);
+    // 🛡️ SECURITY: Pass tokenVersion to the token generator
+    const token = generateToken(user._id, user.tokenVersion);
 
     res.status(201).json({
       message: "User registered successfully",
@@ -62,12 +63,13 @@ const { name, username, email, password, phone } = validation.data;
 export const loginUser = async (req, res) => {
   try {
     const validation = loginSchema.safeParse(req.body);
-if (!validation.success) {
-  return res.status(400).json({
-    message: validation.error.errors[0].message
-  });
-}
-const { identifier, password } = validation.data;
+    
+    if (!validation.success) {
+      return res.status(400).json({
+        message: validation.error.errors[0].message
+      });
+    }
+    const { identifier, password } = validation.data;
 
     // identifier = email OR username OR phone
     const user = await User.findOne({
@@ -96,7 +98,8 @@ const { identifier, password } = validation.data;
       });
     }
 
-    const token = generateToken(user._id);
+    // 🛡️ SECURITY: Pass tokenVersion to the token generator
+    const token = generateToken(user._id, user.tokenVersion);
 
     res.status(200).json({
       message: "Login successful",

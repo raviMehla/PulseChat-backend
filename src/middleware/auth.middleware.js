@@ -32,13 +32,21 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    // 5️⃣ Attach user to request
+    // 🛡️ SECURITY: 5️⃣ Phase 3 Session Revocation Check
+    // If the token version in the JWT does not match the database, the session was revoked.
+    if (user.tokenVersion !== decoded.tokenVersion) {
+      return res.status(401).json({
+        message: "Session expired or revoked. You have been logged out of this device."
+      });
+    }
+
+    // 6️⃣ Attach user to request
     req.user = user;
 
     next();
 
   } catch (error) {
-    // 6️⃣ Handle token errors properly
+    // 7️⃣ Handle token errors properly
     if (error.name === "TokenExpiredError") {
       return res.status(401).json({
         message: "jwt expired"
