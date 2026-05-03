@@ -33,6 +33,9 @@ connectDB();
 // Initialize Express app
 const app = express();
 
+// 🛡️ ARCHITECTURAL FIX: Trust Render's Reverse Proxy for accurate Rate Limiting
+app.set("trust proxy", 1);
+
 // Create HTTP server
 const server = http.createServer(app);
 
