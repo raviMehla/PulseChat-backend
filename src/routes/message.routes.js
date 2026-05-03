@@ -38,16 +38,16 @@ router.delete("/:messageId", protect, deleteMessage);
 
 // =====================================
 // FETCHING & QUERIES (GET)
-// 🚨 CRITICAL ORDERING: Static prefixes must go BEFORE generic /:chatId parameters
+// 🚨 CRITICAL ORDERING: Specific paths must go BEFORE generic parameters
 // =====================================
 
-// 1. 🛡️ SEARCH FIX: Matches the frontend GET /api/message/search/:chatId
+// 1. Search Route
 router.get("/search/:chatId", protect, heavyTaskLimiter, searchMessages);
 
-// 2. CONTEXT FIX: Matches frontend context fetch
-router.get("/context/:chatId/:messageId", protect, getMessageContext);
+// 2. 🛡️ CONTEXT FIX: Realigned to match frontend /:chatId/context/:messageId
+router.get("/:chatId/context/:messageId", protect, getMessageContext);
 
-// 3. Generic Fetch Route (Must remain at the very bottom so it doesn't hijack /search)
+// 3. Generic Fetch Route (Must remain at the very bottom)
 router.get("/:chatId", protect, getMessages);
 
 export default router;
