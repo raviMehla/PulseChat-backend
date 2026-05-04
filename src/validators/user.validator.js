@@ -1,15 +1,31 @@
 import { z } from "zod";
 
+import { z } from "zod";
+
 // ==========================================
 // PROFILE & SETTINGS VALIDATORS
 // ==========================================
 export const updateProfileSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").optional(),
   bio: z.string().max(150, "Bio cannot exceed 150 characters").optional(),
-  settings: z.object({
-    theme: z.enum(["light", "dark", "system"]).optional(),
-    notificationsEnabled: z.boolean().optional(),
-  }).optional(),
+  
+  // 🛡️ ARCHITECTURAL UPGRADE: Safely parse stringified JSON from FormData
+  settings: z.preprocess(
+    (val) => {
+      if (typeof val === "string") {
+        try {
+          return JSON.parse(val);
+        } catch (e) {
+          return val; // If it fails to parse, pass the raw string so Zod can throw a proper type error
+        }
+      }
+      return val;
+    },
+    z.object({
+      theme: z.enum(["light", "dark", "system"]).optional(),
+      notificationsEnabled: z.boolean().optional(),
+    })
+  ).optional(),
 });
 
 export const deleteAccountSchema = z.object({
