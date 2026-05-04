@@ -5,7 +5,6 @@ import { upload } from "../middleware/upload.middleware.js";
 import {
   getProfile,
   updateProfile,  
-  updateProfilePic,
   updatePrivacy,
   updatePassword,
   logoutAllDevices,
@@ -28,9 +27,9 @@ router.use(protect);
 // ==========================================
 // PROFILE MANAGEMENT
 // ==========================================
+// 🛡️ ARCHITECTURAL UPGRADE: Unified route handles text and file simultaneously
 router.get("/profile", getProfile);
-router.put("/profile", updateProfile);
-router.put("/profile-pic", upload.single("profilePic"), updateProfilePic);
+router.put("/profile", upload.single("profilePic"), updateProfile);
 
 // ==========================================
 // PRIVACY & SECURITY (Phase 2 & 3)

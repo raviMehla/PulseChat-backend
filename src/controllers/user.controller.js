@@ -45,60 +45,46 @@ export const getUserStatus = async (req, res) => {
 };
 
 // =====================================
-// UPDATE PROFILE (Name, Bio, Settings)
+// UNIFIED PROFILE UPDATE (Text + Avatar)
 // =====================================
 export const updateProfile = async (req, res) => {
   try {
-    // 🛡️ ARCHITECTURAL FIX: Strict Zod Validation
+    // 1️⃣ Strict Zod Validation (multer has already parsed the text fields into req.body)
     const validation = updateProfileSchema.safeParse(req.body);
     if (!validation.success) {
       return res.status(400).json({ message: validation.error.errors[0].message });
     }
 
     const { name, bio, settings } = validation.data;
-    
-    // Use $set to dynamically update only provided fields without overwriting others
     const updatePayload = {};
+
+    // 2️⃣ Map validated text fields
     if (name) updatePayload.name = name;
     if (bio) updatePayload.bio = bio;
-    if (settings) updatePayload.settings = settings;
+    if (settings) updatePayload.settings = settings; // Note: Ensure frontend sends this as stringified JSON if using FormData
 
+    // 3️⃣ File Handling (multer has stored the file and attached it to req.file)
+    if (req.file) {
+      // Assuming your upload.middleware.js is configured with Cloudinary/S3 storage
+      updatePayload.profilePic = req.file.path; 
+    }
+
+    // 4️⃣ Database Execution
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updatePayload },
       { new: true, runValidators: true }
     ).select("-password");
 
-    res.status(200).json({ message: "Profile updated", user });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// =====================================
-// UPDATE PROFILE PICTURE
-// =====================================
-export const updateProfilePic = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No image file provided" });
-    }
-
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { profilePic: req.file.path },
-      { new: true }
-    ).select("-password");
-
-    res.status(200).json({
-      message: "Profile picture updated",
-      profilePic: user.profilePic
+    res.status(200).json({ 
+      message: "Profile updated successfully", 
+      user 
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Unified Profile Update Error:", error);
+    res.status(500).json({ message: "Failed to update profile", error: error.message });
   }
 };
-
 // =====================================
 // UPDATE PRIVACY
 // =====================================
