@@ -4,7 +4,8 @@ import {
   accessChat,
   fetchChats,
   createGroupChat,
-  renameGroup,
+  //renameGroup,
+  updateGroupDetails, // 🛡️ Import the new controller
   addToGroup,
   removeFromGroup,
   leaveGroup
@@ -22,7 +23,11 @@ router.get("/", protect, fetchChats);
 // GROUP CHAT ROUTES
 // ==========================================
 router.post("/group", protect, createGroupChat);
-router.put("/group/rename", protect, renameGroup);
+//router.put("/group/rename", protect, renameGroup); // Kept for backward compatibility
+
+// 🛡️ ARCHITECTURAL UPGRADE: The missing endpoint
+router.put("/group/:chatId/details", protect, updateGroupDetails);
+
 router.put("/group/add", protect, addToGroup);
 router.put("/group/remove", protect, removeFromGroup);
 router.put("/group/leave", protect, leaveGroup);

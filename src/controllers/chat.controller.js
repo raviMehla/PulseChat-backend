@@ -2,7 +2,8 @@ import {
   createGroupSchema, 
   renameGroupSchema, 
   groupMembershipSchema, 
-  leaveGroupSchema 
+  leaveGroupSchema,
+  updateGroupDetailsSchema
 } from "../validators/chat.validator.js";
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
@@ -156,6 +157,7 @@ export const createGroupChat = async (req, res) => {
 // =====================================
 // RENAME GROUP CHAT
 // =====================================
+/*
 export const renameGroup = async (req, res) => {
   try {
     const validation = renameGroupSchema.safeParse(req.body);
@@ -179,6 +181,53 @@ export const renameGroup = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+*/
+// =====================================
+// UPDATE GROUP DETAILS (Name & Description)
+// =====================================
+export const updateGroupDetails = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    // 1️⃣ Strict Zod Validation
+    const validation = updateGroupDetailsSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    // 2️⃣ Fetch Chat & Enforce RBAC (Only Admins can edit)
+    const chat = await Chat.findById(chatId);
+    if (!chat) return res.status(404).json({ message: "Group chat not found" });
+    if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+    
+    if (String(chat.groupAdmin) !== String(req.user._id)) {
+      return res.status(403).json({ message: "Only group administrators can update details." });
+    }
+
+    // 3️⃣ Apply Updates
+    if (validation.data.chatName) chat.chatName = validation.data.chatName;
+    if (validation.data.description !== undefined) chat.description = validation.data.description;
+
+    await chat.save();
+    
+    // Announce the change inside the chat
+    await createSystemMessage(chatId, `${req.user.name} updated the group details`);
+
+    // Populate necessary fields for the frontend to render correctly
+    const updatedChat = await Chat.findById(chatId)
+      .populate("users", "-password")
+      .populate("groupAdmin", "-password");
+
+    // 4️⃣ Real-Time Synchronization via Socket.io
+    const io = getIO();
+    io.to(chatId).emit("group_updated", updatedChat);
+
+    res.status(200).json(updatedChat);
+  } catch (error) {
+    console.error("Update Group Details Error:", error);
+    res.status(500).json({ message: "Internal server error while updating group details" });
   }
 };
 

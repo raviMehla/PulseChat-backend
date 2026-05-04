@@ -12,6 +12,18 @@ const chatSchema = new mongoose.Schema(
       trim: true
     },
 
+    // 🛡️ ARCHITECTURAL UPGRADE: Support for Group Details
+    description: {
+      type: String,
+      default: "",
+      maxLength: [250, "Description cannot exceed 250 characters"]
+    },
+    
+    groupAvatar: {
+      type: String,
+      default: ""
+    },
+
     users: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -28,16 +40,18 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message"
     },
+    
     unreadCount: {
-  type: Map,
-  of: Number,
-  default: {}
-},
-  // 🟢 Phase 2: Group Invites
-  pendingMembers: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
-  }],
+      type: Map,
+      of: Number,
+      default: {}
+    },
+    
+    // 🟢 Phase 2: Group Invites
+    pendingMembers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }],
   },
   { timestamps: true }
 );
