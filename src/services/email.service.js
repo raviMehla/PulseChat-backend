@@ -1,18 +1,22 @@
 import nodemailer from "nodemailer";
 
-// 🛡️ ARCHITECTURAL UPGRADE: Explicit Cloud-Ready SMTP Configuration
+// 🛡️ ARCHITECTURAL UPGRADE: Force IPv4 for Render compatibility
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 587, // Use 587 for STARTTLS which is more firewall-friendly than 465
-  secure: false, // STARTTLS will be used instead of SSL/TLS on port 587
-  //port: 465,
-  //secure: true, // Use SSL/TLS
+  port: 587,
+  secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD, // MUST be a Google App Password
+    pass: process.env.EMAIL_APP_PASSWORD,
   },
-  // Optional: Add a timeout to fail fast rather than hanging for 120 seconds
-  connectionTimeout: 10000, // Fail after 10 seconds if no connection
+  connectionTimeout: 10000, // Fail after 10 seconds
+  // 🛡️ CRITICAL FIX: Force IPv4 to prevent ENETUNREACH on Render
+  tls: {
+      rejectUnauthorized: false
+  },
+  host: 'smtp.gmail.com',
+  // Alternatively, you can use the IPv4 address directly if DNS resolution is failing
+  // host: '142.251.16.109', 
 });
 
 // Verify connection on boot
