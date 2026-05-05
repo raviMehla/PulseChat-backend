@@ -1,42 +1,20 @@
-import nodemailer from "nodemailer";
+import { Resend } from 'resend';
 
-// 🛡️ ARCHITECTURAL UPGRADE: Force IPv4 for Render compatibility
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
-  },
-  connectionTimeout: 10000, // Fail after 10 seconds
-  // 🛡️ CRITICAL FIX: Force IPv4 to prevent ENETUNREACH on Render
-  tls: {
-      rejectUnauthorized: false
-  },
-  host: 'smtp.gmail.com',
-  // Alternatively, you can use the IPv4 address directly if DNS resolution is failing
-  // host: '142.251.16.109', 
-});
-
-// Verify connection on boot
-transporter.verify((error, success) => {
-  if (error) {
-    console.warn("SMTP Connection Warning:", error.message);
-  } else {
-    console.log("🟢 SMTP Server is ready to take messages");
-  }
-});
+// 🛡️ ARCHITECTURAL UPGRADE: Initialize the Resend HTTP Client
+// This communicates securely over Port 443 (HTTPS), bypassing all cloud SMTP firewalls.
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ==========================================
 // SEND OTP EMAIL
 // ==========================================
 export const sendDeletionOTP = async (userEmail, otp) => {
   try {
-    const mailOptions = {
-      from: `"PulseChat Security" <${process.env.EMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      // NOTE: Until you verify a custom domain (e.g., security@pulsechat.com), 
+      // Resend uses a default onboarding address.
+      from: 'PulseChat Security <onboarding@resend.dev>', 
       to: userEmail,
-      subject: "Critical: Account Deletion Verification Code",
+      subject: 'Critical: Account Deletion Verification Code',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #333; border-radius: 8px; background-color: #111; color: #eee;">
           <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">Account Deletion Request</h2>
@@ -47,13 +25,20 @@ export const sendDeletionOTP = async (userEmail, otp) => {
           <p style="color: #aaa; font-size: 12px;">This code expires in 15 minutes. If you did not request this, please ignore this email and change your password immediately.</p>
         </div>
       `,
-    };
+    });
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ Deletion OTP sent to ${userEmail} (${info.messageId})`);
+    // Handle API-level rejections (e.g., invalid email, rate limits)
+    if (error) {
+      console.error("Resend API Rejected the Payload:", error);
+      throw new Error("Failed to dispatch email via Resend");
+    }
+
+    console.log(`✉️ Deletion OTP successfully dispatched. Resend ID: ${data.id}`);
     return true;
+    
   } catch (error) {
-    console.error("Email Delivery Failed:", error);
-    throw new Error("Failed to send verification email");
+    // Catch absolute network failures
+    console.error("Email Delivery Pipeline Failed:", error.message);
+    throw error;
   }
 };
