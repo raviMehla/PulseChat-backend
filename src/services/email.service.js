@@ -3,8 +3,10 @@ import nodemailer from "nodemailer";
 // 🛡️ ARCHITECTURAL UPGRADE: Explicit Cloud-Ready SMTP Configuration
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // Use SSL/TLS
+  port: 587, // Use 587 for STARTTLS which is more firewall-friendly than 465
+  secure: false, // STARTTLS will be used instead of SSL/TLS on port 587
+  //port: 465,
+  //secure: true, // Use SSL/TLS
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_APP_PASSWORD, // MUST be a Google App Password
