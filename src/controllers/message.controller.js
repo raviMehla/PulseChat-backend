@@ -1,4 +1,4 @@
-import { searchMessageSchema, sendMessageSchema } from "../validators/message.validator.js";
+import { searchMessageSchema, sendMessageSchema, getMessageHistorySchema   } from "../validators/message.validator.js";
 import mongoose from "mongoose";
 import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
@@ -257,11 +257,22 @@ export const deleteMessage = async (req, res) => {
 export const getMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
-    const cursor = req.query.cursor; 
 
-    let query = { chat: chatId };
-    if (cursor) query.createdAt = { $lt: new Date(cursor) };
+    // 🛡️ Zod Validation for Query Params
+    const validation = getMessageHistorySchema.safeParse(req.query);
+    if (!validation.success) {
+      return res.status(400).json({ message: "Invalid pagination parameters" });
+    }
+
+    const limit = validation.data.limit || 20;
+    const cursor = validation.data.cursor; 
+
+    let query = { chat: chatId, isDeleted: { $ne: true } }; // Ensure we don't send purely deleted bodies
+    
+    // Apply Cursor-based $lt filter
+    if (cursor) {
+      query.createdAt = { $lt: new Date(cursor) };
+    }
 
     const messages = await Message.find(query)
       .sort({ createdAt: -1 }) 
@@ -275,14 +286,15 @@ export const getMessages = async (req, res) => {
       });
 
     const orderedMessages = messages.reverse();
-    const nextCursor = messages.length > 0 ? messages[messages.length - 1].createdAt : null;
+    // The oldest message in this batch becomes the cursor for the next batch
+    const nextCursor = messages.length > 0 ? messages[0].createdAt : null;
 
     res.status(200).json({ messages: orderedMessages, nextCursor });
   } catch (error) {
+    console.error("Get Messages Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
-
 // =====================================
 // REACT TO MESSAGE
 // ===================================== 

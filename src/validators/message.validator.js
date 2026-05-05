@@ -26,3 +26,12 @@ export const searchMessageSchema = z.object({
     .min(1, "Search query cannot be empty")
     .max(100, "Search query is too long")
 });
+
+// 🛡️ ARCHITECTURAL UPGRADE: Pagination Validation
+// =====================================
+export const getMessageHistorySchema = z.object({
+  // Ensure the cursor is a valid ISO-8601 datetime string to prevent NoSQL injection on the $lt operator
+  cursor: z.string().datetime().optional().nullable(),
+  // Limit is passed as a string in query params, so we validate the string regex and cast to Number
+  limit: z.string().regex(/^\d+$/).transform(Number).optional()
+});
