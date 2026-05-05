@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
 // 🛡️ ARCHITECTURAL UPGRADE: Initialize the Resend HTTP Client
-// This communicates securely over Port 443 (HTTPS), bypassing all cloud SMTP firewalls.
+// Communicates securely over Port 443 (HTTPS), bypassing all cloud SMTP firewalls.
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ==========================================
@@ -9,11 +9,15 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ==========================================
 export const sendDeletionOTP = async (userEmail, otp) => {
   try {
+    // ⚠️ DEV ENVIRONMENT OVERRIDE: 
+    // If you are testing and haven't verified a domain on Resend, 
+    // it will ONLY send to your registered email. 
+    // You can set TEST_DELIVERY_EMAIL in your .env on Render to override this temporarily.
+    const targetEmail = process.env.TEST_DELIVERY_EMAIL || userEmail;
+
     const { data, error } = await resend.emails.send({
-      // NOTE: Until you verify a custom domain (e.g., security@pulsechat.com), 
-      // Resend uses a default onboarding address.
       from: 'PulseChat Security <onboarding@resend.dev>', 
-      to: userEmail,
+      to: targetEmail,
       subject: 'Critical: Account Deletion Verification Code',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #333; border-radius: 8px; background-color: #111; color: #eee;">
@@ -27,17 +31,22 @@ export const sendDeletionOTP = async (userEmail, otp) => {
       `,
     });
 
-    // Handle API-level rejections (e.g., invalid email, rate limits)
+    // Handle API-level rejections (e.g., Sandbox restrictions, Rate limits)
     if (error) {
-      console.error("Resend API Rejected the Payload:", error);
-      throw new Error("Failed to dispatch email via Resend");
+      console.error(`❌ Resend API Rejected Payload [${error.name}]:`, error.message);
+      
+      // If it's the sandbox error, provide a clear terminal warning
+      if (error.statusCode === 403) {
+         console.warn("⚠️  ARCHITECTURAL WARNING: You are in Resend Sandbox mode. You must either test with your registered email or verify a domain.");
+      }
+      
+      throw new Error(`Email API Error: ${error.message}`);
     }
 
-    console.log(`✉️ Deletion OTP successfully dispatched. Resend ID: ${data.id}`);
+    console.log(`✅ Deletion OTP successfully dispatched to ${targetEmail}. Resend ID: ${data.id}`);
     return true;
     
   } catch (error) {
-    // Catch absolute network failures
     console.error("Email Delivery Pipeline Failed:", error.message);
     throw error;
   }
