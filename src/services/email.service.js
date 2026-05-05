@@ -1,12 +1,25 @@
 import nodemailer from "nodemailer";
 
-// Initialize the SMTP Transporter
+// 🛡️ ARCHITECTURAL UPGRADE: Explicit Cloud-Ready SMTP Configuration
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // Use SSL/TLS
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
+    pass: process.env.EMAIL_APP_PASSWORD, // MUST be a Google App Password
   },
+  // Optional: Add a timeout to fail fast rather than hanging for 120 seconds
+  connectionTimeout: 10000, // Fail after 10 seconds if no connection
+});
+
+// Verify connection on boot
+transporter.verify((error, success) => {
+  if (error) {
+    console.warn("SMTP Connection Warning:", error.message);
+  } else {
+    console.log("🟢 SMTP Server is ready to take messages");
+  }
 });
 
 // ==========================================
@@ -15,7 +28,7 @@ const transporter = nodemailer.createTransport({
 export const sendDeletionOTP = async (userEmail, otp) => {
   try {
     const mailOptions = {
-      from: `"Jahangir Mehla Inc. Security" <${process.env.EMAIL_USER}>`,
+      from: `"PulseChat Security" <${process.env.EMAIL_USER}>`,
       to: userEmail,
       subject: "Critical: Account Deletion Verification Code",
       html: `
@@ -30,7 +43,8 @@ export const sendDeletionOTP = async (userEmail, otp) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️ Deletion OTP sent to ${userEmail} (${info.messageId})`);
     return true;
   } catch (error) {
     console.error("Email Delivery Failed:", error);
