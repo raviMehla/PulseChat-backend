@@ -11,11 +11,10 @@ export const registerUser = async (req, res) => {
     const validation = registerSchema.safeParse(req.body);
 
     if (!validation.success) {
-  // 🛡️ FIX: Use .issues for standard Zod compatibility and added safety
-  return res.status(400).json({
-    message: validation.error.issues[0]?.message || "Invalid input data"
-  });
-}
+      return res.status(400).json({
+        message: validation.error.issues[0]?.message || "Invalid input data"
+      });
+    }
     const { name, username, email, password, phone } = validation.data;
 
     // Check existing user
@@ -35,10 +34,8 @@ export const registerUser = async (req, res) => {
       email,
       password: hashedPassword,
       phone
-      // tokenVersion defaults to 0 via our updated Mongoose schema
     });
 
-    // 🛡️ SECURITY: Pass tokenVersion to the token generator
     const token = generateToken(user._id, user.tokenVersion);
 
     res.status(201).json({
@@ -81,17 +78,21 @@ export const loginUser = async (req, res) => {
       ]
     });
 
+    // 🛡️ ARCHITECTURAL UPGRADE: Precise Error Mapping
     if (!user) {
-      return res.status(400).json({ message: "User not found" });
+      return res.status(404).json({ message: "No account found with these details. Please check your credentials or register a new account." });
+    }
+
+    if (user.isDeleted) {
+      return res.status(403).json({ message: "This account has been deleted. Please register a new account to continue." });
     }
 
     const isMatch = await comparePassword(password, user.password);
 
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid password" });
+      return res.status(401).json({ message: "Incorrect password. Please try again." });
     }
 
-    // If 2FA enabled (future extension)
     if (user.twoFactorEnabled) {
       return res.status(200).json({
         message: "Two-factor authentication required",
@@ -99,7 +100,6 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // 🛡️ SECURITY: Pass tokenVersion to the token generator
     const token = generateToken(user._id, user.tokenVersion);
 
     res.status(200).json({
