@@ -369,3 +369,34 @@ export const leaveGroup = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// =====================================
+// DELETE 1-ON-1 CHAT
+// =====================================
+export const deleteChat = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    const chat = await Chat.findById(chatId);
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+    // 🛡️ Security: Ensure the user requesting deletion is actually part of this chat
+    if (!chat.users.includes(req.user._id.toString())) {
+      return res.status(403).json({ message: "Not authorized to delete this chat." });
+    }
+
+    // Wipe all messages associated with this chat
+    await Message.deleteMany({ chat: chatId });
+    
+    // Delete the chat document itself
+    await Chat.findByIdAndDelete(chatId);
+
+    // Note: We don't emit a socket event here. The other user will simply see the chat 
+    // disappear on their next refresh, mirroring WhatsApp/Telegram "Delete Chat" behavior.
+
+    res.status(200).json({ message: "Chat deleted successfully from your device." });
+  } catch (error) {
+    console.error("Delete Chat Error:", error);
+    res.status(500).json({ message: "Internal server error during chat deletion." });
+  }
+};

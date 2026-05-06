@@ -8,7 +8,8 @@ import {
   updateGroupDetails, // 🛡️ Import the new controller
   addToGroup,
   removeFromGroup,
-  leaveGroup
+  leaveGroup,
+  deleteChat
 } from "../controllers/chat.controller.js";
 
 const router = express.Router();
@@ -31,5 +32,6 @@ router.put("/group/:chatId/details", protect, updateGroupDetails);
 router.put("/group/add", protect, addToGroup);
 router.put("/group/remove", protect, removeFromGroup);
 router.put("/group/leave", protect, leaveGroup);
+router.delete("/:chatId", protect, deleteChat);
 
 export default router;

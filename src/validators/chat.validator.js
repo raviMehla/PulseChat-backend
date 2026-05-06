@@ -40,3 +40,7 @@ export const updateGroupDetailsSchema = z.object({
   chatName: z.string().min(1, "Group name cannot be empty").max(50, "Group name is too long").optional(),
   description: z.string().max(250, "Description cannot exceed 250 characters").optional(),
 });
+
+export const deleteChatSchema = z.object({
+  chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format")
+});
