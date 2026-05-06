@@ -11,6 +11,7 @@ export const registerUser = async (req, res) => {
     const validation = registerSchema.safeParse(req.body);
 
     if (!validation.success) {
+      // 🛡️ FIX: Use .issues for standard Zod compatibility and added safety
       return res.status(400).json({
         message: validation.error.issues[0]?.message || "Invalid input data"
       });
@@ -34,8 +35,10 @@ export const registerUser = async (req, res) => {
       email,
       password: hashedPassword,
       phone
+      // tokenVersion defaults to 0 via our updated Mongoose schema
     });
 
+    // 🛡️ SECURITY: Pass tokenVersion to the token generator
     const token = generateToken(user._id, user.tokenVersion);
 
     res.status(201).json({
@@ -54,7 +57,6 @@ export const registerUser = async (req, res) => {
   }
 };
 
-
 // ==========================
 // LOGIN USER
 // ==========================
@@ -63,10 +65,11 @@ export const loginUser = async (req, res) => {
     const validation = loginSchema.safeParse(req.body);
     
     if (!validation.success) {
-      return res.status(400).json({
-        message: validation.error.errors[0].message
-      });
+      // Support both Zod validation return formats safely
+      const errorMsg = validation.error.errors?.[0]?.message || validation.error.issues?.[0]?.message;
+      return res.status(400).json({ message: errorMsg });
     }
+    
     const { identifier, password } = validation.data;
 
     // identifier = email OR username OR phone
@@ -78,9 +81,9 @@ export const loginUser = async (req, res) => {
       ]
     });
 
-    // 🛡️ ARCHITECTURAL UPGRADE: Precise Error Mapping
+    // 🛡️ ARCHITECTURAL UPGRADE: Precise Error State Mapping
     if (!user) {
-      return res.status(404).json({ message: "No account found with these details. Please check your credentials or register a new account." });
+      return res.status(404).json({ message: "No account found with these details. Please check your credentials or register." });
     }
 
     if (user.isDeleted) {
@@ -90,9 +93,11 @@ export const loginUser = async (req, res) => {
     const isMatch = await comparePassword(password, user.password);
 
     if (!isMatch) {
-      return res.status(401).json({ message: "Incorrect password. Please try again." });
+      // Use 400 Bad Request instead of 401 to prevent the global Axios interceptor from hijacking the UX
+      return res.status(400).json({ message: "Incorrect password. Please try again." });
     }
 
+    // If 2FA enabled (future extension)
     if (user.twoFactorEnabled) {
       return res.status(200).json({
         message: "Two-factor authentication required",
@@ -100,6 +105,7 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    // 🛡️ SECURITY: Pass tokenVersion to the token generator
     const token = generateToken(user._id, user.tokenVersion);
 
     res.status(200).json({
