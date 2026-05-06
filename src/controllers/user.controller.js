@@ -196,6 +196,7 @@ export const toggleBlockUser = async (req, res) => {
 // =====================================
 export const searchUsers = async (req, res) => {
   try {
+    // 1️⃣ Strict Zod Validation
     const validation = searchUserSchema.safeParse(req.query);
     if (!validation.success) {
       return res.status(400).json({ message: validation.error.issues[0].message });
@@ -203,17 +204,20 @@ export const searchUsers = async (req, res) => {
 
     const keyword = validation.data.search;
 
+    // 2️⃣ Multi-Field Search Execution
     const users = await User.find({
-      _id: { $ne: req.user._id },
+      _id: { $ne: req.user._id }, // Never return the current user in search results
       $or: [
         { name: { $regex: keyword, $options: "i" } },
         { email: { $regex: keyword, $options: "i" } },
-        { username: { $regex: keyword, $options: "i" } }
+        { username: { $regex: keyword, $options: "i" } },
+        { phone: { $regex: keyword, $options: "i" } } // 📱 Added Phone support per architectural requirements
       ]
-    }).select("-password").limit(20);
+    }).select("-password").limit(20); // Cap at 20 to protect memory/bandwidth
 
     res.status(200).json(users);
   } catch (error) {
+    console.error("User Search Error:", error);
     res.status(500).json({ message: "Internal server error during user search" });
   }
 };

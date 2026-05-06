@@ -1,4 +1,5 @@
 import { 
+  accessChatSchema,
   createGroupSchema, 
   renameGroupSchema, 
   groupMembershipSchema, 
@@ -30,12 +31,19 @@ const createSystemMessage = async (chatId, text) => {
 // =====================================
 export const accessChat = async (req, res) => {
   try {
-    const { userId } = req.body;
+    // 1️⃣ Strict Zod Validation
+    const validation = accessChatSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
 
-    if (!userId) return res.status(400).json({ message: "UserId is required" });
-    if (userId === req.user._id.toString()) return res.status(400).json({ message: "Cannot chat with yourself" });
+    const { userId } = validation.data;
 
-    // 1️⃣ Check if chat already exists
+    if (userId === req.user._id.toString()) {
+      return res.status(400).json({ message: "Cannot chat with yourself" });
+    }
+
+    // 2️⃣ Check if chat already exists
     let chat = await Chat.findOne({
       isGroup: false,
       users: { $all: [req.user._id, userId] }
@@ -45,7 +53,7 @@ export const accessChat = async (req, res) => {
 
     if (chat) return res.status(200).json(chat);
 
-    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Prevent creating a new chat if blocked
+    // 3️⃣ 🛡️ PRIVACY ENFORCEMENT: Prevent creating a new chat if blocked
     const [sender, receiver] = await Promise.all([
       User.findById(req.user._id).select("blockedUsers"),
       User.findById(userId).select("blockedUsers")
@@ -58,7 +66,7 @@ export const accessChat = async (req, res) => {
       return res.status(403).json({ message: "Cannot initiate chat with this user at this time." });
     }
 
-    // 3️⃣ Create the new chat
+    // 4️⃣ Create the new chat
     const newChat = await Chat.create({
       isGroup: false,
       users: [req.user._id, userId]
