@@ -6,6 +6,10 @@ import Message from "./models/Message.js";
 
 let io; // Hold the Singleton instance
 
+// 🛡️ ARCHITECTURAL ADDITION: Global Socket Registry
+// Maps userId to socketId to track active TCP connections across the Node.js process
+export const userSocketMap = {}; 
+
 export const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
@@ -49,6 +53,9 @@ export const initializeSocket = (server) => {
   io.on("connection", async (socket) => {
     console.log("🟢 Authenticated socket connected:", socket.userId);
     
+    // 🛡️ Register the active connection in our Global Map
+    userSocketMap[String(socket.userId)] = socket.id;
+
     // Join a personal room for direct user-to-user events (like getting kicked from a group)
     socket.join(String(socket.userId));
 
@@ -123,6 +130,11 @@ export const initializeSocket = (server) => {
       console.log("🔴 Socket disconnected:", socket.userId);
       typingCooldowns.delete(socket.id);
       deliveryCooldowns.delete(socket.id);
+
+      // 🛡️ Safely remove user from the Global Registry
+      if (userSocketMap[String(socket.userId)] === socket.id) {
+        delete userSocketMap[String(socket.userId)];
+      }
 
       try {
         await User.findByIdAndUpdate(socket.userId, { isOnline: false, lastSeen: new Date() });

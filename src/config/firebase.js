@@ -8,13 +8,11 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-
-//console.log("ENV CHECK:", process.env.FIREBASE_SERVICE_ACCOUNT);
-console.log("Firebase initialized");
-
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log("🟢 Firebase Admin SDK initialized successfully");
+}
 
 export default admin;
