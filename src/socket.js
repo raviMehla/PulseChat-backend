@@ -152,6 +152,43 @@ export const initializeSocket = (server) => {
       }
     });
 
+    // 3. User A cancels the call before User B answers
+    socket.on("cancel_call", ({ to }) => {
+      const targetSocketId = userSocketMap[String(to)];
+      if (targetSocketId) {
+        // Tell User B to stop ringing
+        io.to(targetSocketId).emit("call_cancelled");
+      }
+    });
+
+    // ─────────────────────────────────────────────
+    // WEBRTC SIGNALING (PHASE 2: THE HANDSHAKE)
+    // ─────────────────────────────────────────────
+
+    // 1. Relay the WebRTC SDP Offer (User A -> User B)
+    socket.on("webrtc_offer", ({ userToCall, sdp }) => {
+      const targetSocketId = userSocketMap[String(userToCall)];
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("webrtc_offer", { from: socket.userId, sdp });
+      }
+    });
+
+    // 2. Relay the WebRTC SDP Answer (User B -> User A)
+    socket.on("webrtc_answer", ({ to, sdp }) => {
+      const targetSocketId = userSocketMap[String(to)];
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("webrtc_answer", { from: socket.userId, sdp });
+      }
+    });
+
+    // 3. Relay ICE Candidates (Network pathways)
+    socket.on("webrtc_ice_candidate", ({ to, candidate }) => {
+      const targetSocketId = userSocketMap[String(to)];
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("webrtc_ice_candidate", { from: socket.userId, candidate });
+      }
+    });
+
     // 🔥 DISCONNECT & MEMORY CLEANUP
     socket.on("disconnect", async () => {
       console.log("🔴 Socket disconnected:", socket.userId);
