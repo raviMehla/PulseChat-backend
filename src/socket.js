@@ -125,6 +125,33 @@ export const initializeSocket = (server) => {
       }
     });
 
+    // ─────────────────────────────────────────────
+    // WEBRTC SIGNALING (PHASE 1: THE RING)
+    // ─────────────────────────────────────────────
+    
+    // 1. User A initiates a call to User B
+    socket.on("call_user", ({ userToCall, from, callerName }) => {
+      const targetSocketId = userSocketMap[String(userToCall)];
+      
+      if (targetSocketId) {
+        // Ring User B's device directly
+        io.to(targetSocketId).emit("incoming_call", { from, callerName });
+      } else {
+        // User B is offline - instantly bounce the call back
+        socket.emit("call_rejected", { reason: "offline" });
+      }
+    });
+
+    // 2. User B declines the call
+    socket.on("reject_call", ({ to }) => {
+      const targetSocketId = userSocketMap[String(to)];
+      
+      if (targetSocketId) {
+        // Tell User A the call was declined
+        io.to(targetSocketId).emit("call_rejected");
+      }
+    });
+
     // 🔥 DISCONNECT & MEMORY CLEANUP
     socket.on("disconnect", async () => {
       console.log("🔴 Socket disconnected:", socket.userId);
