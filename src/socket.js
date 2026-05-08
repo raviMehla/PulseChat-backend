@@ -11,10 +11,17 @@ let io; // Hold the Singleton instance
 export const userSocketMap = {}; 
 
 export const initializeSocket = (server) => {
+  // 🛡️ ARCHITECTURAL UPGRADE: Strict Socket CORS Policy
+  const allowedOrigins = [
+    "http://localhost:5173",
+    "https://pulsechat-frontend-three.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
+  ];
+
   io = new Server(server, {
     cors: {
-      origin: "*", // Update this to your specific frontend URL in production
-      methods: ["GET", "POST"]
+      origin: allowedOrigins,
+      methods: ["GET", "POST"],
+      credentials: true
     }
   });
 
