@@ -54,8 +54,16 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    // Allow requests with no origin (like mobile apps or curl requests) or local development/simulators
+    if (!origin || 
+        origin === "null" || 
+        origin.startsWith("file://") || 
+        origin.startsWith("http://localhost") || 
+        origin.startsWith("http://127.0.0.1") || 
+        origin.startsWith("http://192.168.") || 
+        origin.startsWith("http://10.")) {
+      return callback(null, true);
+    }
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       return callback(new Error(msg), false);

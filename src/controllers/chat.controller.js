@@ -10,6 +10,20 @@ import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
 import { getIO } from "../socket.js";
+import cloudinary from "../config/cloudinary.js";
+import streamifier from "streamifier";
+
+// ─────────────────────────────────────────────────────────────
+// CLOUDINARY UPLOAD HELPER (Buffer → Cloud URL)
+// ─────────────────────────────────────────────────────────────
+const uploadBufferToCloudinary = (buffer, folder = "pulsechat/avatars") =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { resource_type: "image", folder },
+      (error, result) => (error ? reject(error) : resolve(result))
+    );
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
 
 // =====================================
 // SYSTEM MESSAGE GENERATOR
@@ -109,12 +123,20 @@ export const fetchChats = async (req, res) => {
 // =====================================
 export const createGroupChat = async (req, res) => {
   try {
+    if (typeof req.body.users === "string") {
+      try {
+        req.body.users = JSON.parse(req.body.users);
+      } catch (err) {
+        return res.status(400).json({ message: "Invalid users format" });
+      }
+    }
+
     const validation = createGroupSchema.safeParse(req.body);
     if (!validation.success) {
       return res.status(400).json({ message: validation.error.issues[0].message });
     }
 
-    const { name, users } = validation.data;
+    const { name, users, description } = validation.data;
     const creatorId = req.user._id.toString();
     const uniqueParticipants = Array.from(new Set(users.filter(id => id !== creatorId)));
 
@@ -142,11 +164,19 @@ export const createGroupChat = async (req, res) => {
     // Validation passed, add admin to the participants array
     uniqueParticipants.push(creatorId);
 
+    let avatarUrl = "";
+    if (req.file) {
+      const uploadRes = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
+      avatarUrl = uploadRes.secure_url;
+    }
+
     const group = await Chat.create({
       chatName: name,
       isGroup: true,
       users: uniqueParticipants,
-      groupAdmin: creatorId
+      groupAdmin: creatorId,
+      description: description || "",
+      groupAvatar: avatarUrl
     });
 
     const fullGroup = await Chat.findById(group._id)
@@ -217,6 +247,11 @@ export const updateGroupDetails = async (req, res) => {
     // 3️⃣ Apply Updates
     if (validation.data.chatName) chat.chatName = validation.data.chatName;
     if (validation.data.description !== undefined) chat.description = validation.data.description;
+
+    if (req.file) {
+      const uploadRes = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
+      chat.groupAvatar = uploadRes.secure_url;
+    }
 
     await chat.save();
     

@@ -12,7 +12,8 @@ export const createGroupSchema = z.object({
     .min(1, "Group name cannot be empty")
     .max(50, "Group name is too long"),
   users: z.array(z.string().regex(objectIdRegex, "Invalid User ID format"))
-    .min(1, "You must select at least 1 user to start a group") 
+    .min(1, "You must select at least 1 user to start a group"),
+  description: z.string().max(250, "Description cannot exceed 250 characters").optional()
 });
 
 export const searchUserSchema = z.object({

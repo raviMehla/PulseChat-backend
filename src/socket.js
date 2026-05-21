@@ -23,8 +23,16 @@ export const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
       origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, Postman, curl, etc.)
-        if (!origin) return callback(null, true);
+        // Allow requests with no origin (mobile apps, Postman, curl, etc.) or local development/simulators
+        if (!origin || 
+            origin === "null" || 
+            origin.startsWith("file://") || 
+            origin.startsWith("http://localhost") || 
+            origin.startsWith("http://127.0.0.1") || 
+            origin.startsWith("http://192.168.") || 
+            origin.startsWith("http://10.")) {
+          return callback(null, true);
+        }
 
         // Allow known web origins
         if (allowedOrigins.includes(origin)) return callback(null, true);
@@ -142,10 +150,10 @@ export const initializeSocket = (server) => {
     // ─────────────────────────────────────────────
     
     // 1. User A initiates a call to User B
-    socket.on("call_user", ({ userToCall, from, callerName, type }) => {
+    socket.on("call_user", ({ userToCall, from, callerName, type, chatId }) => {
       const targetSocketId = userSocketMap[String(userToCall)];
       if (targetSocketId) {
-        io.to(targetSocketId).emit("incoming_call", { from, callerName, type });
+        io.to(targetSocketId).emit("incoming_call", { from, callerName, type, chatId });
       } else {
         socket.emit("call_rejected", { reason: "offline" });
       }
