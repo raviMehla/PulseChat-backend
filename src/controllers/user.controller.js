@@ -36,7 +36,7 @@ import { generateToken } from "../services/token.service.js";
 // =====================================
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id).select("-password").populate("blockedUsers", "_id name username profilePic");
     if (!user) return res.status(404).json({ message: "User not found" });
     
     res.status(200).json(user);
@@ -89,7 +89,7 @@ export const updateProfile = async (req, res) => {
       req.user._id,
       { $set: updatePayload },
       { new: true, runValidators: true }
-    ).select("-password");
+    ).select("-password").populate("blockedUsers", "_id name username profilePic");
 
     res.status(200).json({ 
       message: "Profile updated successfully", 
