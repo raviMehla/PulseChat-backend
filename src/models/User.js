@@ -39,7 +39,11 @@ const userSchema = new mongoose.Schema(
 
     // 🟢 Phase 4: Account Deletion Pipeline
     deletionOtp: { type: String, default: null },
-    deletionOtpExpires: { type: Date, default: null }
+    deletionOtpExpires: { type: Date, default: null },
+
+    // 🟢 Forgot Password Pipeline
+    resetPasswordOtp: { type: String, default: null },
+    resetPasswordOtpExpires: { type: Date, default: null }
   },
   { timestamps: true }
 );

@@ -37,7 +37,12 @@ router.put("/profile", upload.single("profilePic"), updateProfile);
 router.put("/privacy", updatePrivacy);
 router.put("/password", updatePassword);
 router.post("/logout-all", logoutAllDevices);
+
+// 🛡️ DUAL-ROUTE BLOCK: Supports both web (URL param) and mobile APK (request body)
+// Web frontend:  PUT /users/block/:targetUserId
+// Mobile APK:    PUT /users/block  { targetUserId: "..." }
 router.put("/block/:targetUserId", toggleBlockUser);
+router.put("/block", toggleBlockUser);
 
 // ==========================================
 // USER DISCOVERY & STATUS

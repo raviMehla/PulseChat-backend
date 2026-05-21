@@ -33,6 +33,12 @@ const messageSchema = new mongoose.Schema(
       default: false
     },
 
+    // Forwarded message flag
+    isForwarded: {
+      type: Boolean,
+      default: false
+    },
+
     fileUrl: {
       type: String,
       default: null

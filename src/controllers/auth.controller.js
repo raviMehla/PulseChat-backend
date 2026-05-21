@@ -1,7 +1,8 @@
-import { loginSchema, registerSchema } from "../validators/auth.validator.js";
+import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "../validators/auth.validator.js";
 import User from "../models/User.js";
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
 import { generateToken } from "../services/token.service.js";
+import { sendPasswordResetOTP } from "../services/email.service.js";
 
 // ==========================
 // REGISTER USER
@@ -121,5 +122,102 @@ export const loginUser = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// ==========================
+// FORGOT PASSWORD — Step 1: Request OTP
+// POST /api/auth/forgot-password
+// Body: { email }
+// ==========================
+export const forgotPassword = async (req, res) => {
+  try {
+    const validation = forgotPasswordSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    const { email } = validation.data;
+
+    // Find user — but always return a generic message to prevent email enumeration
+    const user = await User.findOne({ email });
+
+    if (user && !user.isDeleted) {
+      // Generate a secure 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Save OTP with 15-minute expiry — send email FIRST, save to DB only on success
+      await sendPasswordResetOTP(email, otp);
+
+      await User.findByIdAndUpdate(user._id, {
+        resetPasswordOtp: otp,
+        resetPasswordOtpExpires: Date.now() + 15 * 60 * 1000 // 15 minutes
+      });
+    }
+
+    // Always respond with the same message (prevents user enumeration attack)
+    res.status(200).json({
+      message: "If an account with that email exists, a reset code has been sent."
+    });
+
+  } catch (error) {
+    console.error("ForgotPassword Error:", error);
+    res.status(500).json({ message: "Failed to send reset email. Please try again later." });
+  }
+};
+
+// ==========================
+// RESET PASSWORD — Step 2: Verify OTP & Set New Password
+// POST /api/auth/reset-password
+// Body: { email, otp, newPassword }
+// ==========================
+export const resetPassword = async (req, res) => {
+  try {
+    const validation = resetPasswordSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    const { email, otp, newPassword } = validation.data;
+
+    const user = await User.findOne({ email });
+
+    // 1️⃣ Validate: user exists, OTP matches, OTP is not expired
+    if (!user || user.resetPasswordOtp !== otp) {
+      return res.status(400).json({ message: "Invalid or expired reset code." });
+    }
+
+    if (user.resetPasswordOtpExpires < Date.now()) {
+      return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
+    }
+
+    // 2️⃣ Hash the new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // 3️⃣ Update password, clear OTP fields, and revoke all existing sessions
+    // Incrementing tokenVersion logs the user out of ALL other devices for security
+    user.password = hashedPassword;
+    user.resetPasswordOtp = null;
+    user.resetPasswordOtpExpires = null;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    // 4️⃣ Issue a fresh token for the current session
+    const token = generateToken(user._id, user.tokenVersion);
+
+    res.status(200).json({
+      message: "Password reset successfully. You are now logged in.",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error("ResetPassword Error:", error);
+    res.status(500).json({ message: "Failed to reset password. Please try again." });
   }
 };

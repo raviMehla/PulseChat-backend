@@ -51,7 +51,8 @@ export const sendMessage = async (req, res) => {
       sender: senderId,
       content,
       chat: chatId,
-      replyTo: safeReplyTo
+      replyTo: safeReplyTo,
+      isForwarded: req.body.isForwarded === true
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
@@ -151,7 +152,8 @@ export const sendMediaMessage = async (req, res) => {
       messageType,
       fileUrl: result.secure_url,
       fileName: req.file.originalname,
-      replyTo: safeReplyTo
+      replyTo: safeReplyTo,
+      isForwarded: req.body.isForwarded === true
     });
 
     const populatedMessage = await Message.findById(newMessage._id)

@@ -11,7 +11,10 @@ let io; // Hold the Singleton instance
 export const userSocketMap = {}; 
 
 export const initializeSocket = (server) => {
-  // 🛡️ ARCHITECTURAL UPGRADE: Strict Socket CORS Policy
+  // 🛡️ ARCHITECTURAL UPGRADE: Function-based CORS Policy
+  // Mirrors the same logic as server.js HTTP cors() middleware.
+  // Mobile apps (React Native / APK) send NO Origin header — the !origin
+  // check below allows them through while still blocking unknown web origins.
   const allowedOrigins = [
     "http://localhost:5173",
     "https://pulsechat-frontend-three.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
@@ -19,7 +22,16 @@ export const initializeSocket = (server) => {
 
   io = new Server(server, {
     cors: {
-      origin: allowedOrigins,
+      origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, Postman, curl, etc.)
+        if (!origin) return callback(null, true);
+
+        // Allow known web origins
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+
+        // Block everything else
+        return callback(new Error("Socket connection blocked by CORS policy."), false);
+      },
       methods: ["GET", "POST"],
       credentials: true
     }

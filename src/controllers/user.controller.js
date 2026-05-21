@@ -2,6 +2,21 @@ import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 import { sendDeletionOTP } from "../services/email.service.js"; // 🟢 Genuine SMTP Service
+import cloudinary from "../config/cloudinary.js";
+import streamifier from "streamifier";
+
+// ─────────────────────────────────────────────────────────────
+// CLOUDINARY UPLOAD HELPER (Buffer → Cloud URL)
+// Reusable for profile pics and any future binary uploads
+// ─────────────────────────────────────────────────────────────
+const uploadBufferToCloudinary = (buffer, folder = "pulsechat/avatars") =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { resource_type: "image", folder },
+      (error, result) => (error ? reject(error) : resolve(result))
+    );
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
 
 import { 
   searchUserSchema, 
@@ -63,10 +78,10 @@ export const updateProfile = async (req, res) => {
     if (bio) updatePayload.bio = bio;
     if (settings) updatePayload.settings = settings; // Note: Ensure frontend sends this as stringified JSON if using FormData
 
-    // 3️⃣ File Handling (multer has stored the file and attached it to req.file)
+    // 3️⃣ File Handling — stream buffer to Cloudinary (memoryStorage has no .path)
     if (req.file) {
-      // Assuming your upload.middleware.js is configured with Cloudinary/S3 storage
-      updatePayload.profilePic = req.file.path; 
+      const result = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
+      updatePayload.profilePic = result.secure_url;
     }
 
     // 4️⃣ Database Execution
@@ -167,8 +182,13 @@ export const logoutAllDevices = async (req, res) => {
 // =====================================
 export const toggleBlockUser = async (req, res) => {
   try {
-    const { targetUserId } = req.params;
+    // Support both URL param (web frontend) and request body (mobile APK)
+    const targetUserId = req.params.targetUserId || req.body.targetUserId;
     const currentUserId = req.user._id;
+
+    if (!targetUserId) {
+      return res.status(400).json({ message: "targetUserId is required." });
+    }
 
     if (String(targetUserId) === String(currentUserId)) {
       return res.status(400).json({ message: "You cannot block yourself." });

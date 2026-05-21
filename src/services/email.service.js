@@ -1,18 +1,15 @@
-// 🛡️ ARCHITECTURAL UPGRADE: Native HTTP Fetch API via Brevo
-// Bypasses Render SMTP Blocks (Port 443) AND allows single-sender Gmail verification
-
 // ==========================================
-// SEND OTP EMAIL
+// SEND OTP EMAIL — ACCOUNT DELETION
 // ==========================================
 export const sendDeletionOTP = async (userEmail, otp) => {
   try {
     const payload = {
       sender: {
-        email: process.env.EMAIL_USER, // Your verified Gmail address
+        email: process.env.EMAIL_USER,
         name: 'PulseChat Security'
       },
       to: [
-        { email: userEmail } // Sends to ANY user in your database
+        { email: userEmail }
       ],
       subject: 'Critical: Account Deletion Verification Code',
       htmlContent: `
@@ -27,7 +24,6 @@ export const sendDeletionOTP = async (userEmail, otp) => {
       `
     };
 
-    // Native Node.js Fetch to Brevo's REST API
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
@@ -49,6 +45,56 @@ export const sendDeletionOTP = async (userEmail, otp) => {
     
   } catch (error) {
     console.error("Email Delivery Pipeline Failed:", error.message);
+    throw error;
+  }
+};
+
+// ==========================================
+// SEND OTP EMAIL — PASSWORD RESET
+// ==========================================
+export const sendPasswordResetOTP = async (userEmail, otp) => {
+  try {
+    const payload = {
+      sender: {
+        email: process.env.EMAIL_USER,
+        name: 'PulseChat'
+      },
+      to: [{ email: userEmail }],
+      subject: 'PulseChat — Password Reset Code',
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #333; border-radius: 8px; background-color: #111; color: #eee;">
+          <h2 style="color: #7C6EF7; border-bottom: 1px solid #333; padding-bottom: 10px;">Password Reset Request</h2>
+          <p>We received a request to reset your PulseChat password. Use the code below to set a new password:</p>
+          <div style="background-color: #000; padding: 15px; text-align: center; font-size: 32px; letter-spacing: 8px; font-weight: bold; border-radius: 4px; margin: 20px 0; border: 1px solid #7C6EF7; color: #7C6EF7;">
+            ${otp}
+          </div>
+          <p>This code expires in <strong>15 minutes</strong>.</p>
+          <p style="color: #aaa; font-size: 12px;">If you did not request a password reset, you can safely ignore this email. Your password will not be changed.</p>
+        </div>
+      `
+    };
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("❌ Brevo API Rejected Password Reset Email:", errorData);
+      throw new Error(`Failed to dispatch reset email: ${errorData.message}`);
+    }
+
+    console.log(`✅ Password Reset OTP dispatched to ${userEmail} via Brevo HTTP.`);
+    return true;
+
+  } catch (error) {
+    console.error("Password Reset Email Failed:", error.message);
     throw error;
   }
 };

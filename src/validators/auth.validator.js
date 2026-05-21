@@ -11,3 +11,15 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6)
 });
+
+// ── Forgot Password: Step 1 — Request OTP ──
+export const forgotPasswordSchema = z.object({
+  email: z.string().email("A valid email address is required")
+});
+
+// ── Forgot Password: Step 2 — Verify OTP & Set New Password ──
+export const resetPasswordSchema = z.object({
+  email: z.string().email("A valid email address is required"),
+  otp: z.string().length(6, "OTP must be exactly 6 digits"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters")
+});
