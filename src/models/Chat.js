@@ -52,6 +52,14 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
     }],
+
+    // 🛡️ SOFT DELETION: Users who have "deleted" this chat from their view.
+    // Instead of hard-deleting chats globally, we hide them per user.
+    // When a new message arrives, the sender can pull their ID from this array.
+    hiddenFor: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }],
   },
   { timestamps: true }
 );

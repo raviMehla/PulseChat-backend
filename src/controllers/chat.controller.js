@@ -65,7 +65,14 @@ export const accessChat = async (req, res) => {
       .populate("users", "-password")
       .populate("lastMessage");
 
-    if (chat) return res.status(200).json(chat);
+    if (chat) {
+      // If the user had previously "deleted" (hidden) this chat, restore it
+      if (chat.hiddenFor?.some(id => String(id) === String(req.user._id))) {
+        await Chat.findByIdAndUpdate(chat._id, { $pull: { hiddenFor: req.user._id } });
+        chat = await Chat.findById(chat._id).populate("users", "-password").populate("lastMessage");
+      }
+      return res.status(200).json(chat);
+    }
 
     // 3️⃣ 🛡️ PRIVACY ENFORCEMENT: Prevent creating a new chat if blocked
     const [sender, receiver] = await Promise.all([
@@ -100,7 +107,8 @@ export const accessChat = async (req, res) => {
 export const fetchChats = async (req, res) => {
   try {
     const chats = await Chat.find({
-      users: { $elemMatch: { $eq: req.user._id } }
+      users: { $elemMatch: { $eq: req.user._id } },
+      hiddenFor: { $ne: req.user._id }  // 🛡️ Exclude chats the user has "deleted" (hidden)
     })
       .populate("users", "-password")
       .populate("groupAdmin", "-password")
@@ -406,30 +414,43 @@ export const leaveGroup = async (req, res) => {
 };
 
 // =====================================
-// DELETE 1-ON-1 CHAT
+// DELETE / HIDE CHAT
 // =====================================
 export const deleteChat = async (req, res) => {
   try {
     const { chatId } = req.params;
+    const callerId = req.user._id;
     
     const chat = await Chat.findById(chatId);
     if (!chat) return res.status(404).json({ message: "Chat not found" });
 
     // 🛡️ Security: Ensure the user requesting deletion is actually part of this chat
-    if (!chat.users.includes(req.user._id.toString())) {
+    const isMember = chat.users.some(u => String(u) === String(callerId));
+    if (!isMember) {
       return res.status(403).json({ message: "Not authorized to delete this chat." });
     }
 
-    // Wipe all messages associated with this chat
-    await Message.deleteMany({ chat: chatId });
-    
-    // Delete the chat document itself
-    await Chat.findByIdAndDelete(chatId);
+    const isGroupAdmin = chat.isGroup && String(chat.groupAdmin) === String(callerId);
 
-    // Note: We don't emit a socket event here. The other user will simply see the chat 
-    // disappear on their next refresh, mirroring WhatsApp/Telegram "Delete Chat" behavior.
+    if (isGroupAdmin) {
+      // Group admin deletes the entire group — hard delete
+      await Message.deleteMany({ chat: chatId });
+      await Chat.findByIdAndDelete(chatId);
 
-    res.status(200).json({ message: "Chat deleted successfully from your device." });
+      // Notify all remaining members
+      const io = getIO();
+      io.to(chatId).emit("group_deleted", { chatId });
+
+      return res.status(200).json({ message: "Group deleted successfully." });
+    }
+
+    // For regular members and 1-on-1 chats: soft-delete (hide) for this user only
+    await Chat.findByIdAndUpdate(chatId, {
+      $addToSet: { hiddenFor: callerId },
+      $set: { [`unreadCount.${String(callerId)}`]: 0 }
+    });
+
+    res.status(200).json({ message: "Chat removed from your list." });
   } catch (error) {
     console.error("Delete Chat Error:", error);
     res.status(500).json({ message: "Internal server error during chat deletion." });

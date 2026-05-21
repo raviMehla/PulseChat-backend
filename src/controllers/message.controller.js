@@ -8,9 +8,23 @@ import User from "../models/User.js"; // 🔥 Imported User for privacy checks
 import { getIO } from "../socket.js";
 import { sendPushNotification } from "../services/notification.service.js";
 
-// =====================================
-// SEND TEXT MESSAGE
-// =====================================
+// 🛡️ AUTHORIZATION HELPER
+// Verifies the requesting user is a member of the chat.
+// Returns the chat document so callers can reuse it; throws 403 if unauthorized.
+const verifyChatMembership = async (chatId, userId, res) => {
+  const chat = await Chat.findById(chatId);
+  if (!chat) {
+    res.status(404).json({ message: "Chat not found" });
+    return null;
+  }
+  const isMember = chat.users.some(u => String(u) === String(userId));
+  if (!isMember) {
+    res.status(403).json({ message: "You are not a member of this chat." });
+    return null;
+  }
+  return chat;
+};
+
 export const sendMessage = async (req, res) => {
   try {
     const validation = sendMessageSchema.safeParse(req.body);
@@ -21,9 +35,9 @@ export const sendMessage = async (req, res) => {
     const { content, chatId, replyTo } = validation.data;
     const senderId = req.user._id;
 
-    // 1️⃣ Fetch the Chat context to verify users
-    const chatContext = await Chat.findById(chatId);
-    if (!chatContext) return res.status(404).json({ message: "Chat not found" });
+    // 1️⃣ Verify membership (replaces manual Chat.findById + not-found check)
+    const chatContext = await verifyChatMembership(chatId, senderId, res);
+    if (!chatContext) return;
 
     // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Check Block Status (1-on-1 Chats Only)
     if (!chatContext.isGroup) {
@@ -43,6 +57,11 @@ export const sendMessage = async (req, res) => {
           return res.status(403).json({ message: "Cannot send messages to this user at this time." });
         }
       }
+    }
+
+    // 3️⃣ Auto-unhide chat for anyone who had soft-deleted it
+    if (chatContext.hiddenFor && chatContext.hiddenFor.length > 0) {
+      await Chat.findByIdAndUpdate(chatId, { $set: { hiddenFor: [] } });
     }
 
     let safeReplyTo = (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) ? replyTo : null;
@@ -104,11 +123,16 @@ export const sendMediaMessage = async (req, res) => {
 
     if (!req.file || !chatId) return res.status(400).json({ message: "File and chatId are required" });
 
-    // 1️⃣ Fetch the Chat context
-    const chatContext = await Chat.findById(chatId);
-    if (!chatContext) return res.status(404).json({ message: "Chat not found" });
+    // 1️⃣ Verify membership
+    const chatContext = await verifyChatMembership(chatId, senderId, res);
+    if (!chatContext) return;
 
-    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE Cloudinary upload to save bandwidth
+    // 2️⃣ Auto-unhide chat for anyone who had soft-deleted it
+    if (chatContext.hiddenFor && chatContext.hiddenFor.length > 0) {
+      await Chat.findByIdAndUpdate(chatId, { $set: { hiddenFor: [] } });
+    }
+
+    // 3️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE Cloudinary upload to save bandwidth
     if (!chatContext.isGroup) {
       const receiverId = chatContext.users.find(u => String(u) !== String(senderId));
       
@@ -259,6 +283,10 @@ export const deleteMessage = async (req, res) => {
 export const getMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
+
+    // 🛡️ Verify membership before allowing message history access
+    const chatDoc = await verifyChatMembership(chatId, req.user._id, res);
+    if (!chatDoc) return;
 
     // 🛡️ Zod Validation for Query Params
     const validation = getMessageHistorySchema.safeParse(req.query);

@@ -107,6 +107,19 @@ export const initializeSocket = (server) => {
     socket.on("join_chat", async (chatId) => {
       if (!chatId) return;
       const safeChatId = String(chatId);
+
+      // 🛡️ SECURITY: Verify the socket's authenticated user is actually a member of this chat
+      try {
+        const isMember = await Chat.exists({ _id: safeChatId, users: socket.userId });
+        if (!isMember) {
+          console.warn(`[SOCKET] join_chat REJECTED: User ${socket.userId} is not a member of chat ${safeChatId}`);
+          return;
+        }
+      } catch (err) {
+        console.error("[SOCKET] join_chat membership check failed:", err.message);
+        return;
+      }
+
       socket.join(safeChatId);
       
       try {
@@ -120,6 +133,8 @@ export const initializeSocket = (server) => {
 
     socket.on("typing", ({ chatId }) => {
       if (!chatId) return;
+      // 🛡️ Only relay if socket has actually joined this room
+      if (!socket.rooms.has(String(chatId))) return;
       const now = Date.now();
       const lastTyped = typingCooldowns.get(socket.id) || 0;
       if (now - lastTyped < 1000) return; 
@@ -129,11 +144,15 @@ export const initializeSocket = (server) => {
 
     socket.on("stop_typing", ({ chatId }) => {
       if (!chatId) return;
+      // 🛡️ Only relay if socket has actually joined this room
+      if (!socket.rooms.has(String(chatId))) return;
       socket.to(String(chatId)).emit("stop_typing", { userId: String(socket.userId) });
     });
 
     socket.on("message_delivered", async ({ messageId, chatId }) => {
       if (!messageId || !chatId) return;
+      // 🛡️ Only relay if socket has actually joined this room
+      if (!socket.rooms.has(String(chatId))) return;
       const now = Date.now();
       const lastDelivered = deliveryCooldowns.get(socket.id) || 0;
       if (now - lastDelivered < 300) return; 

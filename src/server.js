@@ -16,6 +16,7 @@ import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import supportRoutes from "./routes/support.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -86,6 +87,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
+app.use("/api/support", supportRoutes);
 
 // Health Check
 app.get("/", (req, res) => {

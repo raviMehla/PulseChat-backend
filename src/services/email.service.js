@@ -98,3 +98,58 @@ export const sendPasswordResetOTP = async (userEmail, otp) => {
     throw error;
   }
 };
+
+// ==========================================
+// SEND SUPPORT TICKET EMAIL
+// ==========================================
+export const sendSupportTicketEmail = async ({ ticketId, category, description, userEmail }) => {
+  try {
+    const payload = {
+      sender: {
+        email: process.env.EMAIL_USER,
+        name: 'PulseChat Support'
+      },
+      to: [
+        { email: 'jahangirmehla007@gmail.com' }
+      ],
+      subject: `[${category}] Support Ticket #${ticketId}`,
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #333; border-radius: 8px; background-color: #111; color: #eee;">
+          <h2 style="color: #7C6EF7; border-bottom: 1px solid #333; padding-bottom: 10px;">New Support Ticket</h2>
+          <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+            <tr><td style="color: #aaa; padding: 8px 0; width: 130px;">Ticket ID</td><td style="color: #7C6EF7; font-weight: bold; font-size: 18px;">#${ticketId}</td></tr>
+            <tr><td style="color: #aaa; padding: 8px 0;">Category</td><td style="color: #eee;">${category}</td></tr>
+            <tr><td style="color: #aaa; padding: 8px 0;">From</td><td style="color: #eee;">${userEmail}</td></tr>
+          </table>
+          <p style="color: #aaa; margin-top: 8px;">Description:</p>
+          <div style="background-color: #1a1a2e; padding: 16px; border-radius: 8px; border-left: 4px solid #7C6EF7; margin-top: 8px;">
+            <p style="color: #eee; white-space: pre-wrap; margin: 0;">${description}</p>
+          </div>
+          <p style="color: #555; font-size: 12px; margin-top: 24px;">Sent from PulseChat Help Desk</p>
+        </div>
+      `
+    };
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Brevo rejected support email: ${errorData.message}`);
+    }
+
+    console.log(`✅ Support ticket #${ticketId} email sent via Brevo.`);
+    return true;
+
+  } catch (error) {
+    console.error('Support Email Failed:', error.message);
+    throw error;
+  }
+};

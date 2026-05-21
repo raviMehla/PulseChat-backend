@@ -67,7 +67,7 @@ export const updateProfile = async (req, res) => {
     // 1️⃣ Strict Zod Validation (multer has already parsed the text fields into req.body)
     const validation = updateProfileSchema.safeParse(req.body);
     if (!validation.success) {
-      return res.status(400).json({ message: validation.error.errors[0].message });
+      return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
     const { name, bio, settings } = validation.data;
@@ -108,7 +108,7 @@ export const updatePrivacy = async (req, res) => {
     // 🛡️ ARCHITECTURAL FIX: Strict Zod Validation
     const validation = updatePrivacySchema.safeParse(req.body);
     if (!validation.success) {
-      return res.status(400).json({ message: validation.error.errors[0].message });
+      return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
     const { lastSeen, profilePhoto } = validation.data;
@@ -135,7 +135,7 @@ export const updatePassword = async (req, res) => {
   try {
     const validation = updatePasswordSchema.safeParse(req.body);
     if (!validation.success) {
-      return res.status(400).json({ message: validation.error.errors[0].message });
+      return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
     const { currentPassword, newPassword } = validation.data;
@@ -344,7 +344,7 @@ export const deleteAccount = async (req, res) => {
     // 1️⃣ Strict Zod Validation
     const validation = deleteAccountSchema.safeParse(req.body);
     if (!validation.success) {
-      return res.status(400).json({ message: validation.error.errors[0].message });
+      return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
     const { password, otp } = validation.data;
