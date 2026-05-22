@@ -20,7 +20,6 @@ const userSchema = new mongoose.Schema(
 
     // 🔥 Multi-Device Push Notifications
     fcmTokens: { type: [String], default: [] },
-    deviceToken: { type: String, default: null },
 
     // 🔥 Status Metrics
     twoFactorEnabled: { type: Boolean, default: false },

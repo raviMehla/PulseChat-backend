@@ -297,7 +297,7 @@ export const getMessages = async (req, res) => {
     const limit = validation.data.limit || 20;
     const cursor = validation.data.cursor; 
 
-    let query = { chat: chatId, isDeleted: { $ne: true } }; // Ensure we don't send purely deleted bodies
+    let query = { chat: chatId };
     
     // Apply Cursor-based $lt filter
     if (cursor) {
@@ -379,6 +379,9 @@ export const searchMessages = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0].message });
     }
 
+    const chatDoc = await verifyChatMembership(chatId, req.user._id, res);
+    if (!chatDoc) return;
+
     const messages = await Message.find({
       chat: chatId,
       isDeleted: { $ne: true },
@@ -412,6 +415,9 @@ export const getMessageContext = async (req, res) => {
       return res.status(400).json({ message: "Invalid ID format" });
     }
 
+    const chatDoc = await verifyChatMembership(chatId, req.user._id, res);
+    if (!chatDoc) return;
+
     const targetMessage = await Message.findById(messageId)
       .populate("sender", "name username email")
       .populate({
@@ -422,6 +428,9 @@ export const getMessageContext = async (req, res) => {
       });
 
     if (!targetMessage) return res.status(404).json({ message: "Target message not found" });
+    if (String(targetMessage.chat) !== String(chatId)) {
+      return res.status(404).json({ message: "Target message not found in this chat" });
+    }
 
     const olderMessages = await Message.find({
       chat: chatId,

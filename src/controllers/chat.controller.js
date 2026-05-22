@@ -40,6 +40,8 @@ const createSystemMessage = async (chatId, text) => {
   io.to(chatId).emit("message_received", populated);
 };
 
+const lastMessageFields = "content messageType fileUrl fileName isDeleted sender createdAt";
+
 // =====================================
 // ACCESS OR CREATE 1-TO-1 CHAT
 // =====================================
@@ -63,13 +65,13 @@ export const accessChat = async (req, res) => {
       users: { $all: [req.user._id, userId] }
     })
       .populate("users", "-password")
-      .populate("lastMessage");
+      .populate("lastMessage", lastMessageFields);
 
     if (chat) {
       // If the user had previously "deleted" (hidden) this chat, restore it
       if (chat.hiddenFor?.some(id => String(id) === String(req.user._id))) {
         await Chat.findByIdAndUpdate(chat._id, { $pull: { hiddenFor: req.user._id } });
-        chat = await Chat.findById(chat._id).populate("users", "-password").populate("lastMessage");
+        chat = await Chat.findById(chat._id).populate("users", "-password").populate("lastMessage", lastMessageFields);
       }
       return res.status(200).json(chat);
     }
@@ -112,7 +114,7 @@ export const fetchChats = async (req, res) => {
     })
       .populate("users", "-password")
       .populate("groupAdmin", "-password")
-      .populate("lastMessage", "content sender createdAt")
+      .populate("lastMessage", lastMessageFields)
       .sort({ updatedAt: -1 });
 
     const formattedChats = chats.map(chat => ({

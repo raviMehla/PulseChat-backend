@@ -24,7 +24,6 @@ import {
   updateProfileSchema, 
   updatePasswordSchema, 
   updatePrivacySchema,
-  deviceTokenSchema,
   deleteAccountSchema 
 } from "../validators/user.validator.js";
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
@@ -247,13 +246,7 @@ export const searchUsers = async (req, res) => {
 // =====================================  
 export const saveDeviceToken = async (req, res) => {
   try {
-    const validation = deviceTokenSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res.status(400).json({ message: validation.error.issues[0].message });
-    }
-
-    await User.findByIdAndUpdate(req.user._id, { deviceToken: validation.data.token });
-    res.status(200).json({ message: "Device token saved" });
+    res.status(200).json({ message: "Device token endpoint is deprecated. Use fcm-token instead." });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -286,7 +279,7 @@ export const exportUserData = async (req, res) => {
 
     // Run aggregations concurrently for performance
     const [profile, chats, messages] = await Promise.all([
-      User.findById(userId).select("-password -fcmTokens -deviceToken"),
+      User.findById(userId).select("-password -fcmTokens"),
       Chat.find({ users: userId }).select("chatName isGroup createdAt"),
       Message.find({ sender: userId }).select("content messageType createdAt")
     ]);
