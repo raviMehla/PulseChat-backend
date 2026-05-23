@@ -149,6 +149,7 @@ export const updatePassword = async (req, res) => {
     
     // 🛡️ SECURITY: Increment tokenVersion to kill all old sessions on other devices
     user.tokenVersion = (user.tokenVersion || 0) + 1;
+    user.fcmTokens = []; // 👈 CRITICAL FIX: Changing password must stop push notifications to old devices
     await user.save();
 
     // Generate a new token for the current device
@@ -168,9 +169,12 @@ export const updatePassword = async (req, res) => {
 // =====================================
 export const logoutAllDevices = async (req, res) => {
   try {
-    // Incrementing tokenVersion invalidates all existing JWTs globally
-    await User.findByIdAndUpdate(req.user._id, { $inc: { tokenVersion: 1 } });
-    res.status(200).json({ message: "Successfully logged out of all devices." });
+    // Incrementing tokenVersion invalidates all existing JWTs globally, and wipes FCM tokens
+    await User.findByIdAndUpdate(req.user._id, { 
+      $inc: { tokenVersion: 1 },
+      $set: { fcmTokens: [] }
+    });
+    res.status(200).json({ message: "Successfully logged out of all devices and revoked push access." });
   } catch (error) {
     res.status(500).json({ message: "Failed to revoke sessions", error: error.message });
   }
@@ -242,16 +246,9 @@ export const searchUsers = async (req, res) => {
 };
 
 // =====================================
+// =====================================
 // REGISTER DEVICE / FCM TOKENS
 // =====================================  
-export const saveDeviceToken = async (req, res) => {
-  try {
-    res.status(200).json({ message: "Device token endpoint is deprecated. Use fcm-token instead." });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
 export const registerFcmToken = async (req, res) => {
   try {
     const validation = fcmTokenSchema.safeParse(req.body);
@@ -267,6 +264,25 @@ export const registerFcmToken = async (req, res) => {
     res.status(200).json({ message: "FCM Token registered successfully" });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const removeFcmToken = async (req, res) => {
+  try {
+    const validation = fcmTokenSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
+
+    await User.findByIdAndUpdate(
+      req.user._id,
+      { $pull: { fcmTokens: validation.data.token } }
+    );
+
+    res.status(200).json({ message: "Device unregistered from push notifications successfully" });
+  } catch (error) {
+    console.error("Remove FCM Token Error:", error);
+    res.status(500).json({ message: "Failed to remove push notification token" });
   }
 };
 

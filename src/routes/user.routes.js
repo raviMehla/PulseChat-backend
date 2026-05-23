@@ -11,8 +11,8 @@ import {
   toggleBlockUser,
   getUserStatus,
   searchUsers,
-  saveDeviceToken,
   registerFcmToken,
+  removeFcmToken,
   exportUserData, requestDeleteOtp, deleteAccount
 } from "../controllers/user.controller.js";
 
@@ -54,8 +54,8 @@ router.get("/status/:id", getUserStatus);
 // ==========================================
 // DEVICE & PUSH NOTIFICATIONS
 // ==========================================
-router.post("/device-token", saveDeviceToken);
 router.post("/fcm-token", registerFcmToken);
+router.delete("/fcm-token", removeFcmToken);
 
 // ==========================================
 // ADVANCED SETTINGS (Backup & Deletion)
