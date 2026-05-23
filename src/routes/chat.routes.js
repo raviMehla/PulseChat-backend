@@ -10,7 +10,8 @@ import {
   addToGroup,
   removeFromGroup,
   leaveGroup,
-  deleteChat
+  deleteChat,
+  promoteToAdmin
 } from "../controllers/chat.controller.js";
 
 const router = express.Router();
@@ -33,6 +34,7 @@ router.put("/group/:chatId/details", protect, upload.single("groupAvatar"), upda
 router.put("/group/add", protect, addToGroup);
 router.put("/group/remove", protect, removeFromGroup);
 router.put("/group/leave", protect, leaveGroup);
+router.put("/group/promote", protect, promoteToAdmin);
 router.delete("/:chatId", protect, deleteChat);
 
 export default router;

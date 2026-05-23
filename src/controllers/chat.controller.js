@@ -458,3 +458,43 @@ export const deleteChat = async (req, res) => {
     res.status(500).json({ message: "Internal server error during chat deletion." });
   }
 };
+
+// =====================================
+// PROMOTE MEMBER TO ADMIN
+// =====================================
+export const promoteToAdmin = async (req, res) => {
+  try {
+    const validation = groupMembershipSchema.safeParse(req.body);
+    if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
+
+    const { chatId, userId } = validation.data;
+    const chat = await Chat.findById(chatId);
+
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+    if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+    if (chat.groupAdmin.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Only the current group admin can promote others." });
+    }
+    if (!chat.users.includes(userId)) {
+      return res.status(400).json({ message: "User is not a member of this group" });
+    }
+
+    chat.groupAdmin = userId;
+    await chat.save();
+
+    const promotedUser = await User.findById(userId);
+    await createSystemMessage(chatId, `${promotedUser.name} was promoted to Group Admin by ${req.user.name}`);
+
+    const updatedChat = await Chat.findById(chatId)
+      .populate("users", "-password")
+      .populate("groupAdmin", "-password");
+
+    const io = getIO();
+    io.to(chatId).emit("group_updated", updatedChat);
+
+    res.status(200).json(updatedChat);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
