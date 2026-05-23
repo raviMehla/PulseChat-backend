@@ -87,6 +87,10 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// 🛡️ LEVEL 1 FIX: Compound Index for ultra-fast chat history queries
+// This prevents MongoDB from doing a full-table scan (COLLSCAN) when loading a chat.
+messageSchema.index({ chat: 1, createdAt: -1 });
+
 const Message = mongoose.model("Message", messageSchema);
 
 export default Message;

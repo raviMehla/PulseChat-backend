@@ -1,4 +1,6 @@
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { createClient } from "redis";
 import jwt from "jsonwebtoken";
 import User from "./models/User.js";
 import Chat from "./models/Chat.js";
@@ -10,7 +12,7 @@ let io; // Hold the Singleton instance
 // Maps userId to socketId to track active TCP connections across the Node.js process
 export const userSocketMap = {}; 
 
-export const initializeSocket = (server) => {
+export const initializeSocket = async (server) => {
   // 🛡️ ARCHITECTURAL UPGRADE: Function-based CORS Policy
   // Mirrors the same logic as server.js HTTP cors() middleware.
   // Mobile apps (React Native / APK) send NO Origin header — the !origin
@@ -44,6 +46,19 @@ export const initializeSocket = (server) => {
       credentials: true
     }
   });
+
+  // 🛡️ LEVEL 1 FIX: Attach Redis Adapter for Horizontal Scaling
+  if (process.env.REDIS_URI) {
+    try {
+      const pubClient = createClient({ url: process.env.REDIS_URI });
+      const subClient = pubClient.duplicate();
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log("🟢 Redis Adapter connected for Socket.io Scaling");
+    } catch (error) {
+      console.error("🔴 Redis connection failed. Falling back to in-memory:", error);
+    }
+  }
 
   // ==========================================
   // SOCKET.IO AUTHENTICATION
@@ -169,10 +184,21 @@ export const initializeSocket = (server) => {
     // ─────────────────────────────────────────────
     
     // 1. User A initiates a call to User B
-    socket.on("call_user", ({ userToCall, from, callerName, type, chatId }) => {
-      const targetSocketId = userSocketMap[String(userToCall)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("incoming_call", { from, callerName, type, chatId });
+    socket.on("call_user", async ({ userToCall, from, callerName, type, chatId }) => {
+      // 🛡️ LEVEL 1 SECURITY FIX: Validate they are actually in a shared chat!
+      try {
+        const isMember = await Chat.exists({ _id: chatId, users: socket.userId });
+        if (!isMember) {
+          console.warn(`[SECURITY] Blocked unauthorized call attempt from ${socket.userId}`);
+          return;
+        }
+      } catch (err) {
+        return;
+      }
+
+      const targetSockets = await io.in(String(userToCall)).fetchSockets();
+      if (targetSockets.length > 0) {
+        io.to(String(userToCall)).emit("incoming_call", { from, callerName, type, chatId });
       } else {
         socket.emit("call_rejected", { reason: "offline" });
       }
@@ -180,27 +206,17 @@ export const initializeSocket = (server) => {
 
     // 🛡️ ARCHITECTURAL FIX: User B Accepts the call!
     socket.on("accept_call", ({ to }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        // Tells User A to start generating the WebRTC SDP Offer
-        io.to(targetSocketId).emit("call_accepted"); 
-      }
+      io.to(String(to)).emit("call_accepted"); 
     });
 
     // 2. User B declines the call
     socket.on("reject_call", ({ to }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("call_rejected", { reason: "declined" });
-      }
+      io.to(String(to)).emit("call_rejected", { reason: "declined" });
     });
 
     // 3. User A cancels the call before User B answers
     socket.on("cancel_call", ({ to }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("call_cancelled");
-      }
+      io.to(String(to)).emit("call_cancelled");
     });
 
     // ─────────────────────────────────────────────
@@ -209,26 +225,17 @@ export const initializeSocket = (server) => {
 
     // 🛡️ ARCHITECTURAL FIX: Use 'to' parameter consistently
     socket.on("webrtc_offer", ({ to, sdp }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("webrtc_offer", { from: socket.userId, sdp });
-      }
+      io.to(String(to)).emit("webrtc_offer", { from: socket.userId, sdp });
     });
 
     // Relay the WebRTC SDP Answer (User B -> User A)
     socket.on("webrtc_answer", ({ to, sdp }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("webrtc_answer", { from: socket.userId, sdp });
-      }
+      io.to(String(to)).emit("webrtc_answer", { from: socket.userId, sdp });
     });
 
     // Relay ICE Candidates (Network pathways)
     socket.on("webrtc_ice_candidate", ({ to, candidate }) => {
-      const targetSocketId = userSocketMap[String(to)];
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("webrtc_ice_candidate", { from: socket.userId, candidate });
-      }
+      io.to(String(to)).emit("webrtc_ice_candidate", { from: socket.userId, candidate });
     });
 
     // 🔥 DISCONNECT & MEMORY CLEANUP

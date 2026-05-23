@@ -41,12 +41,14 @@ app.set("trust proxy", 1);
 const server = http.createServer(app);
 
 // 🔥 Boot up the Socket.IO Engine
-initializeSocket(server);
+await initializeSocket(server);
 
 // ==========================================
 // EXPRESS MIDDLEWARE PIPELINE
 // ==========================================
-app.use(express.json());
+// 🛡️ LEVEL 1 FIX: Strictly cap payload sizes to prevent Memory DoS attacks
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 // 🛡️ ARCHITECTURAL UPGRADE: Strict CORS Policy
 const allowedOrigins = [
   "http://localhost:5173", 

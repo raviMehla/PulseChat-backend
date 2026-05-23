@@ -1,7 +1,6 @@
 import admin from "../config/firebase.js";
 import User from "../models/User.js"; // Required for Zombie Token cleanup
-// 🛡️ IMPORTANT: Ensure your socket.js file exports 'userSocketMap'
-import { userSocketMap } from "../socket.js"; 
+import { getIO, userSocketMap } from "../socket.js"; 
 
 /**
  * Handles sending FCM push notifications using the modern HTTP v1 API.
@@ -9,16 +8,28 @@ import { userSocketMap } from "../socket.js";
  */
 export const sendPushNotification = async (chat, sender, content, messageType = "text") => {
   try {
+    const io = getIO();
+
     // 1. 🛡️ ARCHITECTURAL UPGRADE: Filter out the sender AND actively connected users
-    const offlineReceivers = chat.users.filter((u) => {
+    // We check for active sockets in their cluster-wide personal rooms.
+    const onlineCheckPromises = chat.users.map(async (u) => {
       const isSender = String(u._id) === String(sender._id);
+      if (isSender) return { user: u, shouldNotify: false };
       
-      // Check if the user is currently in our Socket memory map
-      // If they are online, we DO NOT send an FCM push to avoid the "double buzz"
-      const isOnline = userSocketMap && userSocketMap[String(u._id)];
+      let isOnline = false;
+      try {
+        const sockets = await io.in(String(u._id)).fetchSockets();
+        isOnline = sockets.length > 0;
+      } catch (err) {
+        // Fallback to local memory if cluster query fails
+        isOnline = !!(userSocketMap && userSocketMap[String(u._id)]);
+      }
       
-      return !isSender && !isOnline;
+      return { user: u, shouldNotify: !isOnline };
     });
+
+    const results = await Promise.all(onlineCheckPromises);
+    const offlineReceivers = results.filter((r) => r.shouldNotify).map((r) => r.user);
 
     if (offlineReceivers.length === 0) return; // Everyone is online, abort FCM overhead!
 
