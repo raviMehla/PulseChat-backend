@@ -97,11 +97,11 @@ export const sendMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" } 
       });
 
-    // 🛡️ LEVEL 7 FIX: Race-free lastMessage update
-    const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
-    if (latestMsg) {
-      await Chat.findByIdAndUpdate(chatId, { lastMessage: latestMsg._id });
-    }
+    // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+    await Chat.findOneAndUpdate(
+      { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: newMessage.createdAt } }] },
+      { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
+    );
 
     // Update unread counts atomically
     const incUpdate = {};
@@ -237,11 +237,11 @@ export const sendMediaMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" }
       });
 
-    // 🛡️ LEVEL 7 FIX: Race-free lastMessage update
-    const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
-    if (latestMsg) {
-      await Chat.findByIdAndUpdate(chatId, { lastMessage: latestMsg._id });
-    }
+    // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+    await Chat.findOneAndUpdate(
+      { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: newMessage.createdAt } }] },
+      { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
+    );
 
     // Update unread counts atomically
     const incUpdate = {};

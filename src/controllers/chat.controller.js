@@ -57,10 +57,11 @@ const createSystemMessage = async (chatId, text) => {
     messageType: "system"
   });
 
-  const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
-  if (latestMsg) {
-    await Chat.findByIdAndUpdate(chatId, { $set: { lastMessage: latestMsg._id } });
-  }
+  // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+  await Chat.findOneAndUpdate(
+    { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: message.createdAt } }] },
+    { $set: { lastMessage: message._id, lastMessageAt: message.createdAt } }
+  );
 
   const populated = await Message.findById(message._id).populate("chat");
   const io = getIO();

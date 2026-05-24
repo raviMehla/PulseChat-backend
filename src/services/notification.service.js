@@ -1,6 +1,6 @@
 import admin from "../config/firebase.js";
 import User from "../models/User.js"; // Required for Zombie Token cleanup
-import { getIO, userSocketMap } from "../socket.js"; 
+import { getIO, onlineRegistry } from "../socket.js"; 
 
 /**
  * Handles sending FCM push notifications using the modern HTTP v1 API.
@@ -21,12 +21,9 @@ export const sendPushNotification = async (chat, sender, content, messageType = 
         const sockets = await io.in(String(u._id)).fetchSockets();
         isOnline = sockets.some(s => s.data?.platform === "mobile");
       } catch (err) {
-        // Fallback to local memory if cluster query fails
-        const socketId = userSocketMap && userSocketMap[String(u._id)];
-        if (socketId) {
-          const localSocket = io.sockets.sockets.get(socketId);
-          isOnline = localSocket?.data?.platform === "mobile";
-        }
+        // Fallback to onlineRegistry if cluster query fails
+        const platforms = await onlineRegistry.getPlatforms(String(u._id));
+        isOnline = platforms.includes("mobile");
       }
       
       return { user: u, shouldNotify: !isOnline };

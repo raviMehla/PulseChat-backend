@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
 import jwt from "jsonwebtoken";
+import { z } from "zod";
 import User from "./models/User.js";
 import Chat from "./models/Chat.js";
 import Message from "./models/Message.js";
@@ -11,6 +12,74 @@ let io; // Hold the Singleton instance
 // 🛡️ ARCHITECTURAL ADDITION: Global Socket Registry
 // Maps userId to socketId to track active TCP connections across the Node.js process
 export const userSocketMap = {}; 
+
+const tokenPayloadSchema = z.object({
+  id: z.string().optional(),
+  userId: z.string().optional(),
+  _id: z.string().optional(),
+  exp: z.number()
+}).refine(data => data.id || data.userId || data._id, {
+  message: "Token must contain a valid user identifier"
+});
+
+class OnlineRegistry {
+  constructor() {
+    this.localMap = new Map();
+  }
+
+  async register(userId, socketId, platform) {
+    const key = `online:${userId}`;
+    if (redisClient) {
+      try {
+        await redisClient.hSet(key, socketId, platform);
+        await redisClient.expire(key, 86400); // 24-hour safety expiry
+      } catch (err) {
+        console.error("Redis online register failed:", err);
+      }
+    }
+    if (!this.localMap.has(userId)) {
+      this.localMap.set(userId, new Map());
+    }
+    this.localMap.get(userId).set(socketId, platform);
+  }
+
+  async unregister(userId, socketId) {
+    const key = `online:${userId}`;
+    if (redisClient) {
+      try {
+        await redisClient.hDel(key, socketId);
+      } catch (err) {
+        console.error("Redis online unregister failed:", err);
+      }
+    }
+    const userSockets = this.localMap.get(userId);
+    if (userSockets) {
+      userSockets.delete(socketId);
+      if (userSockets.size === 0) {
+        this.localMap.delete(userId);
+      }
+    }
+  }
+
+  async getPlatforms(userId) {
+    const key = `online:${userId}`;
+    if (redisClient) {
+      try {
+        const vals = await redisClient.hVals(key);
+        if (vals && vals.length > 0) return vals;
+      } catch (err) {
+        console.error("Redis getPlatforms failed:", err);
+      }
+    }
+    const userSockets = this.localMap.get(userId);
+    if (userSockets) {
+      return Array.from(userSockets.values());
+    }
+    return [];
+  }
+}
+
+export const onlineRegistry = new OnlineRegistry();
 
 let redisClient = null;
 
@@ -128,16 +197,23 @@ export const initializeSocket = async (server) => {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.id || decoded.userId || decoded._id;
-      socket.tokenExp = decoded.exp; // 🛡️ LEVEL 5 FIX: Store token expiration time
+      
+      // Enforce strict schema validation using Zod
+      const parseResult = tokenPayloadSchema.safeParse(decoded);
+      if (!parseResult.success) {
+        throw new Error(parseResult.error.issues[0]?.message || "Malformed JWT payload");
+      }
+
+      const validatedPayload = parseResult.data;
+      socket.userId = validatedPayload.id || validatedPayload.userId || validatedPayload._id;
+      socket.tokenExp = validatedPayload.exp;
       socket.data = socket.data || {};
       socket.data.platform = socket.handshake.auth?.platform || "web";
       
-      if (!socket.userId) throw new Error("Malformed JWT payload");
       next();
     } catch (err) {
       console.error("Socket authentication failed:", err.message);
-      next(new Error("Invalid token"));
+      next(new Error(err.message || "Invalid token"));
     }
   });
 
@@ -163,6 +239,10 @@ export const initializeSocket = async (server) => {
       next();
     });
     
+    // 🛡️ LEVEL 7 FIX: Register active socket connection and platform cluster-wide
+    const platform = socket.data?.platform || "web";
+    await onlineRegistry.register(String(socket.userId), socket.id, platform);
+
     // Register the active connection in our Global Map
     userSocketMap[String(socket.userId)] = socket.id;
 
@@ -331,6 +411,9 @@ export const initializeSocket = async (server) => {
       } catch (err) {
         console.error("Call clean up on disconnect failed:", err);
       }
+
+      // 🛡️ LEVEL 7 FIX: Unregister from cluster-wide registry
+      await onlineRegistry.unregister(String(socket.userId), socket.id);
 
       if (userSocketMap[String(socket.userId)] === socket.id) {
         delete userSocketMap[String(socket.userId)];

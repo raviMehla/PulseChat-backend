@@ -41,6 +41,10 @@ const chatSchema = new mongoose.Schema(
       ref: "Message"
     },
     
+    lastMessageAt: {
+      type: Date
+    },
+    
     unreadCount: {
       type: Map,
       of: Number,
