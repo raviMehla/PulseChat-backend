@@ -435,23 +435,47 @@ export const removeFromGroup = async (req, res) => {
 // LEAVE GROUP
 // =====================================
 export const leaveGroup = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const validation = leaveGroupSchema.safeParse(req.body);
-    if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
+    if (!validation.success) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: validation.error.issues[0].message });
+    }
 
     const { chatId } = validation.data;
     if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: "Invalid chat ID format" });
     }
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findById(chatId).session(session);
 
-    if (!chat) return res.status(404).json({ message: "Chat not found" });
-    if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+    if (!chat) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Chat not found" });
+    }
+    if (!chat.isGroup) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: "Not a group chat" });
+    }
 
-    const wasAdmin = chat.groupAdmin && chat.groupAdmin.toString() === req.user._id.toString();
+    const userIdStr = req.user._id.toString();
+    const isMember = chat.users.some(user => user.toString() === userIdStr);
+    if (!isMember) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: "You are not a member of this group" });
+    }
+
+    const wasAdmin = chat.groupAdmin && chat.groupAdmin.toString() === userIdStr;
 
     // Remove user
-    chat.users = chat.users.filter(user => user.toString() !== req.user._id.toString());
+    chat.users = chat.users.filter(user => user.toString() !== userIdStr);
 
     // Admin transfer logic
     if (wasAdmin) {
@@ -469,7 +493,7 @@ export const leaveGroup = async (req, res) => {
         chat: chatId,
         messageType: { $in: ["image", "video", "file"] },
         fileUrl: { $ne: null }
-      });
+      }).session(session);
 
       if (mediaMessages.length > 0) {
         const images = [];
@@ -508,13 +532,19 @@ export const leaveGroup = async (req, res) => {
         await Promise.all(deletePromises);
       }
 
-      await Message.deleteMany({ chat: chatId });
-      await Chat.findByIdAndDelete(chatId);
+      await Message.deleteMany({ chat: chatId }).session(session);
+      await Chat.findByIdAndDelete(chatId).session(session);
+
+      await session.commitTransaction();
+      session.endSession();
       return res.status(200).json({ message: "Group deleted (empty)" });
     }
 
-    await chat.save();
+    await chat.save({ session });
     await createSystemMessage(chatId, `${req.user.name} left the group`);
+
+    await session.commitTransaction();
+    session.endSession();
 
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
     const io = getIO();
@@ -523,6 +553,8 @@ export const leaveGroup = async (req, res) => {
     res.status(200).json({ message: "Left group successfully" });
 
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: error.message });
   }
 };

@@ -220,8 +220,8 @@ export const initializeSocket = async (server) => {
   // ==========================================
   // IN-MEMORY THROTTLING (Anti-Spam)
   // ==========================================
-  const typingCooldowns = new Map();
-  const deliveryCooldowns = new Map();
+  const typingCooldowns = new WeakMap();
+  const deliveryCooldowns = new WeakMap();
 
   // ==========================================
   // CONNECTION LOGIC
@@ -234,6 +234,9 @@ export const initializeSocket = async (server) => {
       if (socket.tokenExp && socket.tokenExp * 1000 < Date.now()) {
         console.warn(`[SECURITY] Socket event rejected for user ${socket.userId}: Token expired.`);
         socket.disconnect(true);
+        // Clear/mutate the packet to prevent downstream handlers from processing it
+        packet[0] = "noop";
+        packet[1] = null;
         return next(new Error("Token expired"));
       }
       next();
@@ -300,9 +303,9 @@ export const initializeSocket = async (server) => {
       // 🛡️ Only relay if socket has actually joined this room
       if (!socket.rooms.has(String(chatId))) return;
       const now = Date.now();
-      const lastTyped = typingCooldowns.get(socket.id) || 0;
+      const lastTyped = typingCooldowns.get(socket) || 0;
       if (now - lastTyped < 1000) return; 
-      typingCooldowns.set(socket.id, now);
+      typingCooldowns.set(socket, now);
       socket.to(String(chatId)).emit("typing", { userId: String(socket.userId) });
     });
 
@@ -318,9 +321,9 @@ export const initializeSocket = async (server) => {
       // 🛡️ Only relay if socket has actually joined this room
       if (!socket.rooms.has(String(chatId))) return;
       const now = Date.now();
-      const lastDelivered = deliveryCooldowns.get(socket.id) || 0;
+      const lastDelivered = deliveryCooldowns.get(socket) || 0;
       if (now - lastDelivered < 300) return; 
-      deliveryCooldowns.set(socket.id, now);
+      deliveryCooldowns.set(socket, now);
 
       try {
         await Message.findByIdAndUpdate(messageId, { $addToSet: { deliveredTo: socket.userId } });
@@ -398,8 +401,8 @@ export const initializeSocket = async (server) => {
     // 🔥 DISCONNECT & MEMORY CLEANUP
     socket.on("disconnect", async () => {
       console.log("🔴 Socket disconnected:", socket.userId);
-      typingCooldowns.delete(socket.id);
-      deliveryCooldowns.delete(socket.id);
+      typingCooldowns.delete(socket);
+      deliveryCooldowns.delete(socket);
 
       try {
         const activeCallTarget = await callRegistry.getCall(String(socket.userId));

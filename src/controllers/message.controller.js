@@ -7,6 +7,7 @@ import Message from "../models/Message.js";
 import User from "../models/User.js"; // 🔥 Imported User for privacy checks
 import { getIO } from "../socket.js";
 import { sendPushNotification } from "../services/notification.service.js";
+import { verifyFileMimeType } from "../utils/fileVerifier.js";
 
 // 🛡️ AUTHORIZATION HELPER
 // Verifies the requesting user is a member of the chat.
@@ -112,28 +113,30 @@ export const sendMessage = async (req, res) => {
       }
     });
 
-    let updatedChat = chatContext;
     if (Object.keys(incUpdate).length > 0) {
-      updatedChat = await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate }, { new: true });
+      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
     }
 
+    // 🛡️ LEVEL 8 FIX: Fetch point-in-time POJO snap from MongoDB to avoid document in-memory race conditions
+    const unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
+    
     // 🔥 Real-time emit
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
 
     // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
     const unreadCountsObj = {};
-    if (updatedChat && updatedChat.unreadCount) {
-      if (updatedChat.unreadCount instanceof Map) {
-        updatedChat.unreadCount.forEach((val, key) => {
+    if (unreadQuery && unreadQuery.unreadCount) {
+      if (unreadQuery.unreadCount instanceof Map) {
+        unreadQuery.unreadCount.forEach((val, key) => {
           unreadCountsObj[key] = val;
         });
-      } else if (typeof updatedChat.unreadCount.forEach === "function") {
-        updatedChat.unreadCount.forEach((val, key) => {
+      } else if (typeof unreadQuery.unreadCount.forEach === "function") {
+        unreadQuery.unreadCount.forEach((val, key) => {
           unreadCountsObj[key] = val;
         });
       } else {
-        Object.assign(unreadCountsObj, updatedChat.unreadCount);
+        Object.assign(unreadCountsObj, unreadQuery.unreadCount);
       }
     }
     io.to(chatId).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
@@ -160,6 +163,11 @@ export const sendMediaMessage = async (req, res) => {
     const senderId = req.user._id;
 
     if (!req.file || !chatId) return res.status(400).json({ message: "File and chatId are required" });
+
+    // Server-side binary signature content verification to prevent MIME spoofing
+    if (!verifyFileMimeType(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ message: "File content does not match the declared MIME type. Upload blocked." });
+    }
 
     // 1️⃣ Verify membership
     const chatContext = await verifyChatMembership(chatId, senderId, res);
@@ -252,27 +260,29 @@ export const sendMediaMessage = async (req, res) => {
       }
     });
 
-    let updatedChat = chatContext;
     if (Object.keys(incUpdate).length > 0) {
-      updatedChat = await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate }, { new: true });
+      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
     }
+
+    // 🛡️ LEVEL 8 FIX: Fetch point-in-time POJO snap from MongoDB to avoid document in-memory race conditions
+    const unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
 
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
 
     // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
     const unreadCountsObj = {};
-    if (updatedChat && updatedChat.unreadCount) {
-      if (updatedChat.unreadCount instanceof Map) {
-        updatedChat.unreadCount.forEach((val, key) => {
+    if (unreadQuery && unreadQuery.unreadCount) {
+      if (unreadQuery.unreadCount instanceof Map) {
+        unreadQuery.unreadCount.forEach((val, key) => {
           unreadCountsObj[key] = val;
         });
-      } else if (typeof updatedChat.unreadCount.forEach === "function") {
-        updatedChat.unreadCount.forEach((val, key) => {
+      } else if (typeof unreadQuery.unreadCount.forEach === "function") {
+        unreadQuery.unreadCount.forEach((val, key) => {
           unreadCountsObj[key] = val;
         });
       } else {
-        Object.assign(unreadCountsObj, updatedChat.unreadCount);
+        Object.assign(unreadCountsObj, unreadQuery.unreadCount);
       }
     }
     io.to(chatId).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
