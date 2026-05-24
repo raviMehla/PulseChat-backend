@@ -397,7 +397,7 @@ export const addToGroup = async (req, res) => {
     const updatedChat = await Chat.findByIdAndUpdate(
       chatId,
       { $addToSet: { users: userId } },
-      { new: true }
+      { returnDocument: "after" }
     ).populate("users", "-password").populate("groupAdmin", "-password");
 
     const addedUser = await User.findById(userId);

@@ -127,7 +127,7 @@ export const sendMessage = async (req, res) => {
       unreadQuery = await Chat.findOneAndUpdate(
         { _id: chatId },
         { $inc: incUpdate },
-        { new: true, projection: { unreadCount: 1 }, lean: true }
+        { returnDocument: "after", projection: { unreadCount: 1 }, lean: true }
       );
     } else {
       unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
@@ -297,7 +297,7 @@ export const sendMediaMessage = async (req, res) => {
       unreadQuery = await Chat.findOneAndUpdate(
         { _id: chatId },
         { $inc: incUpdate },
-        { new: true, projection: { unreadCount: 1 }, lean: true }
+        { returnDocument: "after", projection: { unreadCount: 1 }, lean: true }
       );
     } else {
       unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
@@ -487,7 +487,7 @@ export const reactToMessage = async (req, res) => {
       { 
         $pull: { "reactions.$.users": userId } 
       },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     let updatedReactions = [];
@@ -497,7 +497,7 @@ export const reactToMessage = async (req, res) => {
       const cleanedMessage = await Message.findOneAndUpdate(
         { _id: messageId },
         { $pull: { reactions: { users: { $size: 0 } } } },
-        { new: true }
+        { returnDocument: "after" }
       );
       updatedReactions = cleanedMessage ? cleanedMessage.reactions : [];
     } else {
@@ -510,7 +510,7 @@ export const reactToMessage = async (req, res) => {
         { 
           $addToSet: { "reactions.$.users": userId } 
         },
-        { new: true }
+        { returnDocument: "after" }
       );
 
       if (updatedMessage) {
@@ -525,7 +525,7 @@ export const reactToMessage = async (req, res) => {
           { 
             $push: { reactions: { emoji, users: [userId] } } 
           },
-          { new: true }
+          { returnDocument: "after" }
         );
         updatedReactions = updatedMessage ? updatedMessage.reactions : [];
       }

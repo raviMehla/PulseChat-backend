@@ -125,7 +125,7 @@ export const updateProfile = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updatePayload },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     ).select("-password").populate("blockedUsers", "_id name username profilePic");
 
     // 🛡️ LEVEL 5 FIX: Real-Time Identity Sync Broadcasts
