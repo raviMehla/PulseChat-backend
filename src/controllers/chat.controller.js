@@ -259,6 +259,21 @@ export const createGroupChat = async (req, res) => {
       .populate("groupAdmin", "-password");
 
     await createSystemMessage(group._id, `${req.user.name} created the group "${name}"`);
+
+    try {
+      const io = getIO();
+      // Join all online participants to the group's socket room immediately
+      uniqueParticipants.forEach(userId => {
+        io.in(String(userId)).socketsJoin(String(group._id));
+      });
+      // Emit a socket event to notify other users they have been added to a new group
+      uniqueParticipants.forEach(userId => {
+        io.to(String(userId)).emit("added_to_group", fullGroup);
+      });
+    } catch (socketErr) {
+      console.error("Failed to join participants to socket room for new group:", socketErr);
+    }
+
     res.status(201).json(fullGroup);
 
   } catch (error) {

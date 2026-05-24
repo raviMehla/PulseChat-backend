@@ -334,6 +334,28 @@ export const initializeSocket = async (server) => {
       console.error("Failed to auto-join rooms:", error);
     }
 
+    const handleUserOnlineStatus = async () => {
+      console.log("Explicit user_online status update received for:", socket.userId);
+      const platform = socket.data?.platform || "mobile";
+      await onlineRegistry.register(String(socket.userId), socket.id, platform);
+      io.emit("user_online", String(socket.userId));
+      presenceQueue.push({ userId: socket.userId, isOnline: true });
+    };
+
+    const handleUserOfflineStatus = async () => {
+      console.log("Explicit user_offline status update received for:", socket.userId);
+      const remaining = await onlineRegistry.unregister(String(socket.userId), socket.id);
+      if (remaining === 0) {
+        io.emit("user_offline", String(socket.userId));
+        presenceQueue.push({ userId: socket.userId, isOnline: false, lastSeen: new Date() });
+      }
+    };
+
+    socket.on("user-online", handleUserOnlineStatus);
+    socket.on("user_online", handleUserOnlineStatus);
+    socket.on("user-offline", handleUserOfflineStatus);
+    socket.on("user_offline", handleUserOfflineStatus);
+
     // ─────────────────────────────────────────────
     // MESSAGING & TYPING EVENTS
     // ─────────────────────────────────────────────
