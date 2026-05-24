@@ -57,6 +57,9 @@ const createSystemMessage = async (chatId, text) => {
     messageType: "system"
   });
 
+  // 🛡️ LEVEL 3 FIX: Update lastMessage pointer of the chat document atomically
+  await Chat.findByIdAndUpdate(chatId, { $set: { lastMessage: message._id } });
+
   const populated = await Message.findById(message._id).populate("chat");
   const io = getIO();
   io.to(chatId).emit("message_received", populated);

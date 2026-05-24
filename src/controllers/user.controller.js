@@ -4,6 +4,28 @@ import User from "../models/User.js";
 import { sendDeletionOTP } from "../services/email.service.js"; // 🟢 Genuine SMTP Service
 import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
+import { getIO } from "../socket.js";
+
+// Helper to extract Cloudinary public ID from URL
+const getPublicIdFromUrl = (url) => {
+  try {
+    const parts = url.split("/upload/");
+    if (parts.length < 2) return null;
+    let path = parts[1];
+    const versionMatch = path.match(/^v\d+\/(.+)$/);
+    if (versionMatch) {
+      path = versionMatch[1];
+    }
+    const dotIndex = path.lastIndexOf(".");
+    if (dotIndex !== -1) {
+      path = path.substring(0, dotIndex);
+    }
+    return path;
+  } catch (error) {
+    console.error("Failed to parse public_id from URL:", url, error);
+    return null;
+  }
+};
 
 // ─────────────────────────────────────────────────────────────
 // CLOUDINARY UPLOAD HELPER (Buffer → Cloud URL)
@@ -79,6 +101,17 @@ export const updateProfile = async (req, res) => {
 
     // 3️⃣ File Handling — stream buffer to Cloudinary (memoryStorage has no .path)
     if (req.file) {
+      // Fetch existing user to check if they already have an avatar
+      const existingUser = await User.findById(req.user._id).select("profilePic");
+      if (existingUser && existingUser.profilePic) {
+        const oldPublicId = getPublicIdFromUrl(existingUser.profilePic);
+        if (oldPublicId) {
+          // Asynchronously delete the old asset in the background
+          cloudinary.uploader.destroy(oldPublicId)
+            .catch(err => console.error("Failed to delete old avatar from Cloudinary:", err));
+        }
+      }
+
       const result = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
       updatePayload.profilePic = result.secure_url;
     }
@@ -152,6 +185,14 @@ export const updatePassword = async (req, res) => {
     user.fcmTokens = []; // 👈 CRITICAL FIX: Changing password must stop push notifications to old devices
     await user.save();
 
+    // 🛡️ LEVEL 3 FIX: Evict all active stateful websocket connections for this user
+    try {
+      const io = getIO();
+      io.to(String(user._id)).disconnectSockets(true);
+    } catch (err) {
+      console.error("Socket eviction failed on password update:", err);
+    }
+
     // Generate a new token for the current device
     const newToken = generateToken(user._id, user.tokenVersion);
 
@@ -174,6 +215,15 @@ export const logoutAllDevices = async (req, res) => {
       $inc: { tokenVersion: 1 },
       $set: { fcmTokens: [] }
     });
+
+    // 🛡️ LEVEL 3 FIX: Evict all active stateful websocket connections for this user
+    try {
+      const io = getIO();
+      io.to(String(req.user._id)).disconnectSockets(true);
+    } catch (err) {
+      console.error("Socket eviction failed on logout:", err);
+    }
+
     res.status(200).json({ message: "Successfully logged out of all devices and revoked push access." });
   } catch (error) {
     res.status(500).json({ message: "Failed to revoke sessions", error: error.message });
@@ -370,6 +420,15 @@ export const deleteAccount = async (req, res) => {
     // 3️⃣ Safe Wipe Pipeline
     const userId = user._id;
 
+    // 🛡️ LEVEL 3 FIX: Delete avatar from Cloudinary if it exists
+    if (user.profilePic) {
+      const publicId = getPublicIdFromUrl(user.profilePic);
+      if (publicId) {
+        cloudinary.uploader.destroy(publicId)
+          .catch(err => console.error("Failed to delete profile pic from Cloudinary during account deletion:", err));
+      }
+    }
+
     // Remove user from all chats
     await Chat.updateMany(
       { users: userId },
@@ -384,6 +443,14 @@ export const deleteAccount = async (req, res) => {
 
     // Finally, delete the user document
     await User.findByIdAndDelete(userId);
+
+    // 🛡️ LEVEL 3 FIX: Evict all active stateful websocket connections for this user room
+    try {
+      const io = getIO();
+      io.to(String(userId)).disconnectSockets(true);
+    } catch (err) {
+      console.error("Socket eviction failed on account deletion:", err);
+    }
 
     res.status(200).json({ message: "Account has been permanently deleted." });
   } catch (error) {
