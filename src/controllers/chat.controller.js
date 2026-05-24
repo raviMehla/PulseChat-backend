@@ -57,8 +57,10 @@ const createSystemMessage = async (chatId, text) => {
     messageType: "system"
   });
 
-  // 🛡️ LEVEL 3 FIX: Update lastMessage pointer of the chat document atomically
-  await Chat.findByIdAndUpdate(chatId, { $set: { lastMessage: message._id } });
+  const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
+  if (latestMsg) {
+    await Chat.findByIdAndUpdate(chatId, { $set: { lastMessage: latestMsg._id } });
+  }
 
   const populated = await Message.findById(message._id).populate("chat");
   const io = getIO();
@@ -208,19 +210,29 @@ export const createGroupChat = async (req, res) => {
     uniqueParticipants.push(creatorId);
 
     let avatarUrl = "";
+    let uploadRes = null;
     if (req.file) {
-      const uploadRes = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
+      uploadRes = await uploadBufferToCloudinary(req.file.buffer, "pulsechat/avatars");
       avatarUrl = uploadRes.secure_url;
     }
 
-    const group = await Chat.create({
-      chatName: name,
-      isGroup: true,
-      users: uniqueParticipants,
-      groupAdmin: creatorId,
-      description: description || "",
-      groupAvatar: avatarUrl
-    });
+    let group;
+    try {
+      group = await Chat.create({
+        chatName: name,
+        isGroup: true,
+        users: uniqueParticipants,
+        groupAdmin: creatorId,
+        description: description || "",
+        groupAvatar: avatarUrl
+      });
+    } catch (dbError) {
+      if (uploadRes && uploadRes.public_id) {
+        cloudinary.uploader.destroy(uploadRes.public_id)
+          .catch(err => console.error("Failed to delete orphaned group avatar from Cloudinary:", err));
+      }
+      throw dbError;
+    }
 
     const fullGroup = await Chat.findById(group._id)
       .populate("users", "-password")

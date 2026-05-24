@@ -97,7 +97,11 @@ export const sendMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" } 
       });
 
-    await Chat.findByIdAndUpdate(chatId, { lastMessage: populatedMessage._id });
+    // 🛡️ LEVEL 7 FIX: Race-free lastMessage update
+    const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
+    if (latestMsg) {
+      await Chat.findByIdAndUpdate(chatId, { lastMessage: latestMsg._id });
+    }
 
     // Update unread counts atomically
     const incUpdate = {};
@@ -108,13 +112,34 @@ export const sendMessage = async (req, res) => {
       }
     });
 
+    let updatedChat = chatContext;
     if (Object.keys(incUpdate).length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+      updatedChat = await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate }, { new: true });
     }
 
     // 🔥 Real-time emit
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
+
+    // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
+    const unreadCountsObj = {};
+    if (updatedChat && updatedChat.unreadCount) {
+      if (updatedChat.unreadCount instanceof Map) {
+        updatedChat.unreadCount.forEach((val, key) => {
+          unreadCountsObj[key] = val;
+        });
+      } else if (typeof updatedChat.unreadCount.forEach === "function") {
+        updatedChat.unreadCount.forEach((val, key) => {
+          unreadCountsObj[key] = val;
+        });
+      } else {
+        Object.assign(unreadCountsObj, updatedChat.unreadCount);
+      }
+    }
+    io.to(chatId).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
+    chatContext.users.forEach(user => {
+      io.to(String(user._id || user)).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
+    });
 
     // 🔥 Abstracted Service Call
     sendPushNotification(populatedMessage.chat, req.user, content, "text");
@@ -140,18 +165,7 @@ export const sendMediaMessage = async (req, res) => {
     const chatContext = await verifyChatMembership(chatId, senderId, res);
     if (!chatContext) return;
 
-    // 2️⃣ Auto-unhide chat for receivers who had soft-deleted it (hiddenFor)
-    const receiverIds = chatContext.users
-      .map(u => String(u))
-      .filter(id => id !== String(senderId));
-
-    if (receiverIds.length > 0) {
-      await Chat.findByIdAndUpdate(chatId, {
-        $pull: { hiddenFor: { $in: receiverIds } }
-      });
-    }
-
-    // 3️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE Cloudinary upload to save bandwidth
+    // 2️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE any DB updates or Cloudinary uploads
     if (!chatContext.isGroup) {
       const receiverId = chatContext.users.find(u => String(u) !== String(senderId));
       
@@ -168,6 +182,17 @@ export const sendMediaMessage = async (req, res) => {
           return res.status(403).json({ message: "Cannot send messages to this user at this time." });
         }
       }
+    }
+
+    // 3️⃣ Auto-unhide chat for receivers who had soft-deleted it (hiddenFor)
+    const receiverIds = chatContext.users
+      .map(u => String(u))
+      .filter(id => id !== String(senderId));
+
+    if (receiverIds.length > 0) {
+      await Chat.findByIdAndUpdate(chatId, {
+        $pull: { hiddenFor: { $in: receiverIds } }
+      });
     }
 
     let messageType = "file";
@@ -212,7 +237,11 @@ export const sendMediaMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" }
       });
 
-    await Chat.findByIdAndUpdate(chatId, { lastMessage: populatedMessage._id });
+    // 🛡️ LEVEL 7 FIX: Race-free lastMessage update
+    const latestMsg = await Message.findOne({ chat: chatId }).sort({ createdAt: -1, _id: -1 });
+    if (latestMsg) {
+      await Chat.findByIdAndUpdate(chatId, { lastMessage: latestMsg._id });
+    }
 
     // Update unread counts atomically
     const incUpdate = {};
@@ -223,12 +252,33 @@ export const sendMediaMessage = async (req, res) => {
       }
     });
 
+    let updatedChat = chatContext;
     if (Object.keys(incUpdate).length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+      updatedChat = await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate }, { new: true });
     }
 
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
+
+    // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
+    const unreadCountsObj = {};
+    if (updatedChat && updatedChat.unreadCount) {
+      if (updatedChat.unreadCount instanceof Map) {
+        updatedChat.unreadCount.forEach((val, key) => {
+          unreadCountsObj[key] = val;
+        });
+      } else if (typeof updatedChat.unreadCount.forEach === "function") {
+        updatedChat.unreadCount.forEach((val, key) => {
+          unreadCountsObj[key] = val;
+        });
+      } else {
+        Object.assign(unreadCountsObj, updatedChat.unreadCount);
+      }
+    }
+    io.to(chatId).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
+    chatContext.users.forEach(user => {
+      io.to(String(user._id || user)).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
+    });
 
     // 🔥 Abstracted Service Call
     sendPushNotification(populatedMessage.chat, req.user, null, messageType);
@@ -261,6 +311,7 @@ export const markMessagesAsRead = async (req, res) => {
 
     const io = getIO();
     io.to(chatId).emit("messages_read", { chatId, userId: req.user._id });
+    io.to(String(req.user._id)).emit("self_messages_read", { chatId });
     res.status(200).json({ message: "Messages marked as read" });
   } catch (error) {
     res.status(500).json({ message: error.message });

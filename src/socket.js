@@ -12,6 +12,61 @@ let io; // Hold the Singleton instance
 // Maps userId to socketId to track active TCP connections across the Node.js process
 export const userSocketMap = {}; 
 
+let redisClient = null;
+
+class CallRegistry {
+  constructor() {
+    this.localMap = new Map();
+  }
+
+  async setCall(userId, targetId, durationSec = 30) {
+    const key = `call:${userId}`;
+    if (redisClient) {
+      try {
+        await redisClient.set(key, targetId, { EX: durationSec });
+      } catch (err) {
+        console.error("Redis setCall failed, using local backup:", err);
+        this.localMap.set(userId, { targetId, expires: Date.now() + durationSec * 1000 });
+      }
+    } else {
+      this.localMap.set(userId, { targetId, expires: Date.now() + durationSec * 1000 });
+    }
+  }
+
+  async getCall(userId) {
+    const key = `call:${userId}`;
+    if (redisClient) {
+      try {
+        return await redisClient.get(key);
+      } catch (err) {
+        console.error("Redis getCall failed, checking local backup:", err);
+      }
+    }
+    const item = this.localMap.get(userId);
+    if (item) {
+      if (item.expires > Date.now()) {
+        return item.targetId;
+      }
+      this.localMap.delete(userId);
+    }
+    return null;
+  }
+
+  async clearCall(userId) {
+    const key = `call:${userId}`;
+    if (redisClient) {
+      try {
+        await redisClient.del(key);
+      } catch (err) {
+        console.error("Redis clearCall failed, clearing local backup:", err);
+      }
+    }
+    this.localMap.delete(userId);
+  }
+}
+
+export const callRegistry = new CallRegistry();
+
 export const initializeSocket = async (server) => {
   // 🛡️ ARCHITECTURAL UPGRADE: Function-based CORS Policy
   // Mirrors the same logic as server.js HTTP cors() middleware.
@@ -54,6 +109,7 @@ export const initializeSocket = async (server) => {
       const subClient = pubClient.duplicate();
       await Promise.all([pubClient.connect(), subClient.connect()]);
       io.adapter(createAdapter(pubClient, subClient));
+      redisClient = pubClient;
       console.log("🟢 Redis Adapter connected for Socket.io Scaling");
     } catch (error) {
       console.error("🔴 Redis connection failed. Falling back to in-memory:", error);
@@ -211,7 +267,8 @@ export const initializeSocket = async (server) => {
 
       const targetSockets = await io.in(String(userToCall)).fetchSockets();
       if (targetSockets.length > 0) {
-        socket.activeCallTarget = String(userToCall);
+        await callRegistry.setCall(String(socket.userId), String(userToCall), 30);
+        await callRegistry.setCall(String(userToCall), String(socket.userId), 30);
         io.to(String(userToCall)).emit("incoming_call", { from, callerName, type, chatId });
       } else {
         socket.emit("call_rejected", { reason: "offline" });
@@ -219,20 +276,23 @@ export const initializeSocket = async (server) => {
     });
 
     // 🛡️ ARCHITECTURAL FIX: User B Accepts the call!
-    socket.on("accept_call", ({ to }) => {
-      socket.activeCallTarget = String(to);
+    socket.on("accept_call", async ({ to }) => {
+      await callRegistry.setCall(String(socket.userId), String(to), 7200);
+      await callRegistry.setCall(String(to), String(socket.userId), 7200);
       io.to(String(to)).emit("call_accepted"); 
     });
 
     // 2. User B declines the call
-    socket.on("reject_call", ({ to }) => {
-      socket.activeCallTarget = null;
+    socket.on("reject_call", async ({ to }) => {
+      await callRegistry.clearCall(String(socket.userId));
+      await callRegistry.clearCall(String(to));
       io.to(String(to)).emit("call_rejected", { reason: "declined" });
     });
 
     // 3. User A cancels the call before User B answers
-    socket.on("cancel_call", ({ to }) => {
-      socket.activeCallTarget = null;
+    socket.on("cancel_call", async ({ to }) => {
+      await callRegistry.clearCall(String(socket.userId));
+      await callRegistry.clearCall(String(to));
       io.to(String(to)).emit("call_cancelled");
     });
 
@@ -261,9 +321,15 @@ export const initializeSocket = async (server) => {
       typingCooldowns.delete(socket.id);
       deliveryCooldowns.delete(socket.id);
 
-      if (socket.activeCallTarget) {
-        io.to(socket.activeCallTarget).emit("call_cancelled");
-        socket.activeCallTarget = null;
+      try {
+        const activeCallTarget = await callRegistry.getCall(String(socket.userId));
+        if (activeCallTarget) {
+          io.to(activeCallTarget).emit("call_cancelled");
+          await callRegistry.clearCall(String(socket.userId));
+          await callRegistry.clearCall(activeCallTarget);
+        }
+      } catch (err) {
+        console.error("Call clean up on disconnect failed:", err);
       }
 
       if (userSocketMap[String(socket.userId)] === socket.id) {
