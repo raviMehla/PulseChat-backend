@@ -73,6 +73,8 @@ export const sendMessage = async (req, res) => {
       await Chat.findByIdAndUpdate(chatId, {
         $pull: { hiddenFor: { $in: receiverIds } }
       });
+      const io = getIO();
+      io.to(receiverIds).emit("chat_unhidden", { chatId });
     }
 
     let safeReplyTo = (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) ? replyTo : null;
@@ -104,7 +106,7 @@ export const sendMessage = async (req, res) => {
       { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
     );
 
-    // Update unread counts atomically
+    // Update unread counts atomically and fetch point-in-time POJO snap to avoid race conditions
     const incUpdate = {};
     chatContext.users.forEach(user => {
       const userIdStr = user.toString();
@@ -113,12 +115,16 @@ export const sendMessage = async (req, res) => {
       }
     });
 
+    let unreadQuery = null;
     if (Object.keys(incUpdate).length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+      unreadQuery = await Chat.findOneAndUpdate(
+        { _id: chatId },
+        { $inc: incUpdate },
+        { new: true, projection: { unreadCount: 1 }, lean: true }
+      );
+    } else {
+      unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
     }
-
-    // 🛡️ LEVEL 8 FIX: Fetch point-in-time POJO snap from MongoDB to avoid document in-memory race conditions
-    const unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
     
     // 🔥 Real-time emit
     const io = getIO();
@@ -201,6 +207,8 @@ export const sendMediaMessage = async (req, res) => {
       await Chat.findByIdAndUpdate(chatId, {
         $pull: { hiddenFor: { $in: receiverIds } }
       });
+      const io = getIO();
+      io.to(receiverIds).emit("chat_unhidden", { chatId });
     }
 
     let messageType = "file";
@@ -251,7 +259,7 @@ export const sendMediaMessage = async (req, res) => {
       { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
     );
 
-    // Update unread counts atomically
+    // Update unread counts atomically and fetch point-in-time POJO snap to avoid race conditions
     const incUpdate = {};
     chatContext.users.forEach(user => {
       const userIdStr = user.toString();
@@ -260,12 +268,16 @@ export const sendMediaMessage = async (req, res) => {
       }
     });
 
+    let unreadQuery = null;
     if (Object.keys(incUpdate).length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+      unreadQuery = await Chat.findOneAndUpdate(
+        { _id: chatId },
+        { $inc: incUpdate },
+        { new: true, projection: { unreadCount: 1 }, lean: true }
+      );
+    } else {
+      unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
     }
-
-    // 🛡️ LEVEL 8 FIX: Fetch point-in-time POJO snap from MongoDB to avoid document in-memory race conditions
-    const unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
 
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);

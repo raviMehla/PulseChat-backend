@@ -50,22 +50,34 @@ const uploadBufferToCloudinary = (buffer, folder = "pulsechat/avatars") =>
 // =====================================
 // SYSTEM MESSAGE GENERATOR
 // =====================================
-const createSystemMessage = async (chatId, text) => {
-  const message = await Message.create({
+const createSystemMessage = async (chatId, text, session = null) => {
+  const options = session ? { session } : {};
+  const message = await Message.create([{
     chat: chatId,
     content: text,
     messageType: "system"
-  });
+  }], options);
+
+  const msgDoc = message[0];
 
   // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
   await Chat.findOneAndUpdate(
-    { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: message.createdAt } }] },
-    { $set: { lastMessage: message._id, lastMessageAt: message.createdAt } }
+    { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: msgDoc.createdAt } }] },
+    { $set: { lastMessage: msgDoc._id, lastMessageAt: msgDoc.createdAt } },
+    options
   );
 
-  const populated = await Message.findById(message._id).populate("chat");
-  const io = getIO();
-  io.to(chatId).emit("message_received", populated);
+  const populated = await Message.findById(msgDoc._id)
+    .populate("chat")
+    .session(session);
+
+  if (session) {
+    return populated;
+  } else {
+    const io = getIO();
+    io.to(chatId).emit("message_received", populated);
+    return populated;
+  }
 };
 
 const lastMessageFields = "content messageType fileUrl fileName isDeleted sender createdAt";
@@ -541,10 +553,15 @@ export const leaveGroup = async (req, res) => {
     }
 
     await chat.save({ session });
-    await createSystemMessage(chatId, `${req.user.name} left the group`);
+    const systemMsg = await createSystemMessage(chatId, `${req.user.name} left the group`, session);
 
     await session.commitTransaction();
     session.endSession();
+
+    if (systemMsg) {
+      const io = getIO();
+      io.to(chatId).emit("message_received", systemMsg);
+    }
 
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
     const io = getIO();

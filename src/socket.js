@@ -136,6 +136,33 @@ class CallRegistry {
 
 export const callRegistry = new CallRegistry();
 
+const presenceQueue = [];
+
+const processPresenceQueue = async () => {
+  if (presenceQueue.length === 0) return;
+
+  const tasks = {};
+  while (presenceQueue.length > 0) {
+    const task = presenceQueue.shift();
+    tasks[task.userId] = { isOnline: task.isOnline, lastSeen: task.lastSeen || new Date() };
+  }
+
+  const updates = Object.entries(tasks).map(async ([userId, state]) => {
+    try {
+      await User.findByIdAndUpdate(userId, { 
+        isOnline: state.isOnline, 
+        lastSeen: state.lastSeen 
+      });
+    } catch (err) {
+      console.error(`[PRESENCE WORKER] Failed to update presence for user ${userId}:`, err.message);
+    }
+  });
+  await Promise.all(updates);
+};
+
+// Run worker loop every 2 seconds
+setInterval(processPresenceQueue, 2000);
+
 export const initializeSocket = async (server) => {
   // 🛡️ ARCHITECTURAL UPGRADE: Function-based CORS Policy
   // Mirrors the same logic as server.js HTTP cors() middleware.
@@ -252,13 +279,9 @@ export const initializeSocket = async (server) => {
     // Join personal room
     socket.join(String(socket.userId));
 
-    // Broadcast online status to everyone
-    try {
-      await User.findByIdAndUpdate(socket.userId, { isOnline: true });
-      io.emit("user_online", String(socket.userId));
-    } catch (err) {
-      console.error("Online status update error:", err.message);
-    }
+    // Broadcast online status to everyone and enqueue presence DB persistence asynchronously
+    io.emit("user_online", String(socket.userId));
+    presenceQueue.push({ userId: socket.userId, isOnline: true });
 
     // Auto-join active chats
     try {
@@ -422,10 +445,16 @@ export const initializeSocket = async (server) => {
         delete userSocketMap[String(socket.userId)];
       }
 
+      // Check if user has other active connections before declaring offline
       try {
-        await User.findByIdAndUpdate(socket.userId, { isOnline: false, lastSeen: new Date() });
-        io.emit("user_offline", String(socket.userId));
-      } catch (err) {}
+        const activePlatforms = await onlineRegistry.getPlatforms(String(socket.userId));
+        if (activePlatforms.length === 0) {
+          io.emit("user_offline", String(socket.userId));
+          presenceQueue.push({ userId: socket.userId, isOnline: false, lastSeen: new Date() });
+        }
+      } catch (err) {
+        console.error("Disconnect presence check failed:", err);
+      }
     });
   });
 };
