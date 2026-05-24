@@ -658,12 +658,24 @@ export const deleteChat = async (req, res) => {
         await Promise.all(deletePromises);
       }
 
+      // 🛡️ LEVEL 12 FIX: Proactive chat_terminated emission and room evacuation across nodes before db sweeps
+      const io = getIO();
+      io.to(chatId).emit("chat_terminated", { chatId });
+
+      try {
+        const targetSockets = await io.in(String(chatId)).fetchSockets();
+        for (const targetSocket of targetSockets) {
+          targetSocket.leave(String(chatId));
+        }
+      } catch (err) {
+        console.error("Failed to force socket room exits on group delete:", err);
+      }
+
       // Group admin deletes the entire group — hard delete
       await Message.deleteMany({ chat: chatId });
       await Chat.findByIdAndDelete(chatId);
 
       // Notify all remaining members
-      const io = getIO();
       io.to(chatId).emit("group_deleted", { chatId });
 
       return res.status(200).json({ message: "Group deleted successfully." });
@@ -717,6 +729,7 @@ export const promoteToAdmin = async (req, res) => {
 
     const io = getIO();
     io.to(chatId).emit("group_updated", updatedChat);
+    io.to(String(req.user._id)).emit("admin_revoked", { chatId });
 
     res.status(200).json(updatedChat);
   } catch (error) {

@@ -133,9 +133,22 @@ export const sendMessage = async (req, res) => {
       unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
     }
     
-    // 🔥 Real-time emit
+    // 🔥 Abstracted Service Call - executed before stripping fcmTokens/emails
+    sendPushNotification(populatedMessage.chat, req.user, content, "text");
+
+    // 🛡️ LEVEL 11 FIX: Sanitize message payload to prevent sensitive data leaks (emails, fcmTokens)
+    const sanitizedMessage = populatedMessage.toObject();
+    if (sanitizedMessage.chat && Array.isArray(sanitizedMessage.chat.users)) {
+      sanitizedMessage.chat.users = sanitizedMessage.chat.users.map(u => ({
+        _id: u._id,
+        name: u.name,
+        username: u.username
+      }));
+    }
+
+    // 🔥 Real-time emit using sanitized payload
     const io = getIO();
-    io.to(chatId).emit("message_received", populatedMessage);
+    io.to(chatId).emit("message_received", sanitizedMessage);
 
     // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
     const unreadCountsObj = {};
@@ -157,10 +170,7 @@ export const sendMessage = async (req, res) => {
       io.to(String(user._id || user)).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
     });
 
-    // 🔥 Abstracted Service Call
-    sendPushNotification(populatedMessage.chat, req.user, content, "text");
-
-    res.status(201).json({ success: true, data: populatedMessage });
+    res.status(201).json({ success: true, data: sanitizedMessage });
   } catch (error) {
     console.error("SendMessage Error:", error);
     res.status(500).json({ message: error.message });
@@ -293,8 +303,22 @@ export const sendMediaMessage = async (req, res) => {
       unreadQuery = await Chat.findById(chatId).select("unreadCount").lean();
     }
 
+    // 🔥 Abstracted Service Call - executed before stripping fcmTokens/emails
+    sendPushNotification(populatedMessage.chat, req.user, null, messageType);
+
+    // 🛡️ LEVEL 11 FIX: Sanitize message payload to prevent sensitive data leaks (emails, fcmTokens)
+    const sanitizedMessage = populatedMessage.toObject();
+    if (sanitizedMessage.chat && Array.isArray(sanitizedMessage.chat.users)) {
+      sanitizedMessage.chat.users = sanitizedMessage.chat.users.map(u => ({
+        _id: u._id,
+        name: u.name,
+        username: u.username
+      }));
+    }
+
+    // 🔥 Real-time emit using sanitized payload
     const io = getIO();
-    io.to(chatId).emit("message_received", populatedMessage);
+    io.to(chatId).emit("message_received", sanitizedMessage);
 
     // 🛡️ LEVEL 7 FIX: Broadcast updated unread counts Map converted to standard JS object
     const unreadCountsObj = {};
@@ -316,10 +340,7 @@ export const sendMediaMessage = async (req, res) => {
       io.to(String(user._id || user)).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
     });
 
-    // 🔥 Abstracted Service Call
-    sendPushNotification(populatedMessage.chat, req.user, null, messageType);
-
-    res.status(201).json(populatedMessage);
+    res.status(201).json(sanitizedMessage);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -450,34 +471,73 @@ export const reactToMessage = async (req, res) => {
       return res.status(400).json({ message: "Invalid message ID format" });
     }
 
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: "Message not found" });
+    // Verify target message exists
+    const messageExists = await Message.findById(messageId).select("chat");
+    if (!messageExists) return res.status(404).json({ message: "Message not found" });
 
     const userId = req.user._id.toString();
-    const existingReaction = message.reactions.find(r => r.emoji === emoji);
 
-    if (existingReaction) {
-      const alreadyReacted = existingReaction.users.find(u => u.toString() === userId);
-      if (alreadyReacted) {
-        existingReaction.users = existingReaction.users.filter(u => u.toString() !== userId);
-        if (existingReaction.users.length === 0) {
-          message.reactions = message.reactions.filter(r => r.emoji !== emoji);
-        }
-      } else {
-        existingReaction.users.push(userId);
-      }
+    // 🛡️ LEVEL 11 FIX: Atomic database toggles for reactions to prevent race conditions
+    // 1. Try to remove the user's ID from an existing reaction matching the emoji
+    let updatedMessage = await Message.findOneAndUpdate(
+      { 
+        _id: messageId, 
+        reactions: { $elemMatch: { emoji, users: userId } } 
+      },
+      { 
+        $pull: { "reactions.$.users": userId } 
+      },
+      { new: true }
+    );
+
+    let updatedReactions = [];
+
+    if (updatedMessage) {
+      // Clean up empty reaction entries where users array became empty
+      const cleanedMessage = await Message.findOneAndUpdate(
+        { _id: messageId },
+        { $pull: { reactions: { users: { $size: 0 } } } },
+        { new: true }
+      );
+      updatedReactions = cleanedMessage ? cleanedMessage.reactions : [];
     } else {
-      message.reactions.push({ emoji, users: [userId] });
+      // 2. Try to add the user to an existing reaction for this emoji
+      updatedMessage = await Message.findOneAndUpdate(
+        { 
+          _id: messageId, 
+          "reactions.emoji": emoji 
+        },
+        { 
+          $addToSet: { "reactions.$.users": userId } 
+        },
+        { new: true }
+      );
+
+      if (updatedMessage) {
+        updatedReactions = updatedMessage.reactions;
+      } else {
+        // 3. Create a new reaction object for this emoji
+        updatedMessage = await Message.findOneAndUpdate(
+          { 
+            _id: messageId,
+            "reactions.emoji": { $ne: emoji }
+          },
+          { 
+            $push: { reactions: { emoji, users: [userId] } } 
+          },
+          { new: true }
+        );
+        updatedReactions = updatedMessage ? updatedMessage.reactions : [];
+      }
     }
 
-    await message.save();
     const io = getIO();
-    io.to(message.chat.toString()).emit("message_reacted", {
+    io.to(messageExists.chat.toString()).emit("message_reacted", {
       messageId,
-      reactions: message.reactions
+      reactions: updatedReactions
     });
 
-    res.status(200).json({ message: "Reaction updated", reactions: message.reactions });
+    res.status(200).json({ message: "Reaction updated", reactions: updatedReactions });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

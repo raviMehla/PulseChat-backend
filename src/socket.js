@@ -199,19 +199,30 @@ export const initializeSocket = async (server) => {
   io = new Server(server, {
     cors: {
       origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, Postman, curl, etc.) or local development/simulators
-        if (!origin || 
-            origin === "null" || 
-            origin.startsWith("file://") || 
-            origin.startsWith("http://localhost") || 
-            origin.startsWith("http://127.0.0.1") || 
-            origin.startsWith("http://192.168.") || 
-            origin.startsWith("http://10.")) {
-          return callback(null, true);
+        // In production, block all permissive development paths and only allow explicitly whitelisted web origins or empty origin (mobile apps)
+        if (process.env.NODE_ENV === "production") {
+          if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+          return callback(new Error("Socket connection blocked by CORS policy."), false);
         }
 
-        // Allow known web origins
-        if (allowedOrigins.includes(origin)) return callback(null, true);
+        // In development, allow local routes and subnets with strict regex validation to prevent CSWSH (Cross-Site WebSocket Hijacking)
+        const isLocalHost = /^http:\/\/localhost(:\d+)?$/.test(origin);
+        const isLocalIP = /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+        const isPrivateSubnet = /^http:\/\/(192\.168|10)\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin);
+        const isLocalFile = /^file:\/\//.test(origin);
+        const isNullOrigin = origin === "null";
+
+        if (!origin || 
+            isNullOrigin || 
+            isLocalFile || 
+            isLocalHost || 
+            isLocalIP || 
+            isPrivateSubnet || 
+            allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
 
         // Block everything else
         return callback(new Error("Socket connection blocked by CORS policy."), false);
@@ -281,15 +292,24 @@ export const initializeSocket = async (server) => {
     
     // 🛡️ LEVEL 5 FIX: Check token expiration on every incoming socket event packet
     socket.use((packet, next) => {
-      if (socket.tokenExp && socket.tokenExp * 1000 < Date.now()) {
-        console.warn(`[SECURITY] Socket event rejected for user ${socket.userId}: Token expired.`);
+      try {
+        if (!packet || !Array.isArray(packet)) {
+          throw new Error("Invalid socket packet format");
+        }
+        if (socket.tokenExp && socket.tokenExp * 1000 < Date.now()) {
+          console.warn(`[SECURITY] Socket event rejected for user ${socket.userId}: Token expired.`);
+          socket.disconnect(true);
+          // Clear/mutate the packet to prevent downstream handlers from processing it
+          packet[0] = "noop";
+          packet[1] = null;
+          return next(new Error("Token expired"));
+        }
+        next();
+      } catch (err) {
+        console.error(`[SECURITY ERROR] Packet validation failure for user ${socket.userId}:`, err.message);
         socket.disconnect(true);
-        // Clear/mutate the packet to prevent downstream handlers from processing it
-        packet[0] = "noop";
-        packet[1] = null;
-        return next(new Error("Token expired"));
+        return next(err);
       }
-      next();
     });
     
     // 🛡️ LEVEL 7 FIX: Register active socket connection and platform cluster-wide
@@ -447,6 +467,23 @@ export const initializeSocket = async (server) => {
     // 🔥 DISCONNECT & MEMORY CLEANUP
     socket.on("disconnect", async () => {
       console.log("🔴 Socket disconnected:", socket.userId);
+
+      // Clear local process mapping immediately at the entry point of the handler
+      if (userSocketMap[String(socket.userId)] === socket.id) {
+        delete userSocketMap[String(socket.userId)];
+      }
+
+      // Explicitly evacuate socket rooms to clear intermediate network transport targets immediately
+      try {
+        for (const room of socket.rooms) {
+          if (room !== socket.id) {
+            socket.leave(room);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to evacuate socket rooms on disconnect:", err);
+      }
+
       typingCooldowns.delete(socket);
       deliveryCooldowns.delete(socket);
 
@@ -464,10 +501,6 @@ export const initializeSocket = async (server) => {
       // 🛡️ LEVEL 10 FIX: Atomic unregister and online presence check
       try {
         const remaining = await onlineRegistry.unregister(String(socket.userId), socket.id);
-
-        if (userSocketMap[String(socket.userId)] === socket.id) {
-          delete userSocketMap[String(socket.userId)];
-        }
 
         if (remaining === 0) {
           io.emit("user_offline", String(socket.userId));
