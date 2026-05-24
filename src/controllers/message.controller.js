@@ -234,9 +234,15 @@ export const sendMediaMessage = async (req, res) => {
 
     const uploadFromBuffer = () =>
       new Promise((resolve, reject) => {
+        // 🛡️ ARCHITECTURAL FIX: Strict 45-second timeout to prevent infinite hangs
+        const timer = setTimeout(() => {
+          reject(new Error("Cloudinary upload timed out after 45 seconds."));
+        }, 45000);
+
         const stream = cloudinary.uploader.upload_stream(
           { resource_type: "auto", folder: "chat-app" },
           (error, result) => {
+            clearTimeout(timer); // Clear the timeout if it succeeds
             if (error) return reject(error);
             resolve(result);
           }
@@ -340,7 +346,7 @@ export const sendMediaMessage = async (req, res) => {
       io.to(String(user._id || user)).emit("unread_update", { chatId, unreadCounts: unreadCountsObj });
     });
 
-    res.status(201).json(sanitizedMessage);
+    res.status(201).json({ success: true, data: sanitizedMessage });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -395,6 +401,18 @@ export const deleteMessage = async (req, res) => {
     }
 
     const chatId = message.chat.toString();
+
+    // 🛡️ ARCHITECTURAL FIX: Destroy the orphaned file from Cloudinary
+    if (message.fileUrl) {
+      try {
+        const urlParts = message.fileUrl.split("/");
+        const folderAndFile = urlParts.slice(-2).join("/"); // gets "chat-app/filename.jpg"
+        const publicId = folderAndFile.split(".")[0]; // removes extension
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cloudinaryErr) {
+        console.error("Failed to delete file from Cloudinary:", cloudinaryErr);
+      }
+    }
 
     message.isDeleted = true;
     message.content = ""; 
@@ -611,9 +629,9 @@ export const getMessageContext = async (req, res) => {
 
     const olderMessages = await Message.find({
       chat: chatId,
-      createdAt: { $lt: targetMessage.createdAt }
+      _id: { $lt: targetMessage._id }
     })
-      .sort({ createdAt: -1 })
+      .sort({ _id: -1 })
       .limit(15)
       .populate("sender", "name username email")
       .populate({
@@ -625,9 +643,9 @@ export const getMessageContext = async (req, res) => {
 
     const newerMessages = await Message.find({
       chat: chatId,
-      createdAt: { $gt: targetMessage.createdAt }
+      _id: { $gt: targetMessage._id }
     })
-      .sort({ createdAt: 1 })
+      .sort({ _id: 1 })
       .limit(15)
       .populate("sender", "name username email")
       .populate({
