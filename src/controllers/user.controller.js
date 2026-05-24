@@ -92,7 +92,7 @@ export const updateProfile = async (req, res) => {
     }
 
     const { name, bio, settings } = validation.data;
-    const updatePayload = {};
+    const updatePayload = Object.create(null);
 
     // 2️⃣ Map validated text fields
     if (name) updatePayload.name = name;

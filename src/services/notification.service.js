@@ -19,10 +19,14 @@ export const sendPushNotification = async (chat, sender, content, messageType = 
       let isOnline = false;
       try {
         const sockets = await io.in(String(u._id)).fetchSockets();
-        isOnline = sockets.length > 0;
+        isOnline = sockets.some(s => s.data?.platform === "mobile");
       } catch (err) {
         // Fallback to local memory if cluster query fails
-        isOnline = !!(userSocketMap && userSocketMap[String(u._id)]);
+        const socketId = userSocketMap && userSocketMap[String(u._id)];
+        if (socketId) {
+          const localSocket = io.sockets.sockets.get(socketId);
+          isOnline = localSocket?.data?.platform === "mobile";
+        }
       }
       
       return { user: u, shouldNotify: !isOnline };

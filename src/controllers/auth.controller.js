@@ -73,6 +73,9 @@ export const loginUser = async (req, res) => {
     
     const { identifier, password } = validation.data;
 
+    // Pre-computed bcrypt hash of "dummy_password" with 10 salt rounds to match standard cost
+    const DUMMY_HASH = "$2a$10$Kwy34S/Xv2e.Gk3Gg8g4v.Oa94uY78t9y1u2i3o4p5a6s7d8f9g0h";
+
     // identifier = email OR username OR phone
     const user = await User.findOne({
       $or: [
@@ -82,20 +85,20 @@ export const loginUser = async (req, res) => {
       ]
     });
 
-    // 🛡️ ARCHITECTURAL UPGRADE: Precise Error State Mapping
-    if (!user) {
-      return res.status(404).json({ message: "No account found with these details. Please check your credentials or register." });
+    let isMatch = false;
+    if (user) {
+      isMatch = await comparePassword(password, user.password);
+    } else {
+      // Execute dummy check to prevent timing side-channel attacks
+      await comparePassword(password, DUMMY_HASH);
+    }
+
+    if (!user || !isMatch) {
+      return res.status(400).json({ message: "Invalid credentials. Please check your username/email/phone and password." });
     }
 
     if (user.isDeleted) {
       return res.status(403).json({ message: "This account has been deleted. Please register a new account to continue." });
-    }
-
-    const isMatch = await comparePassword(password, user.password);
-
-    if (!isMatch) {
-      // Use 400 Bad Request instead of 401 to prevent the global Axios interceptor from hijacking the UX
-      return res.status(400).json({ message: "Incorrect password. Please try again." });
     }
 
     // If 2FA enabled (future extension)

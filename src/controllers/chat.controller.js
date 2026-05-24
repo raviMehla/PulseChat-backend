@@ -341,17 +341,25 @@ export const addToGroup = async (req, res) => {
     if (chat.groupAdmin.toString() !== adminId.toString()) return res.status(403).json({ message: "Only admin can add" });
     if (chat.users.includes(userId)) return res.status(400).json({ message: "User already in group" });
 
-    // 🛡️ PRIVACY ENFORCEMENT: Block Check
-    const [adminUser, targetUser] = await Promise.all([
-      User.findById(adminId).select("blockedUsers"),
-      User.findById(userId).select("blockedUsers")
-    ]);
-
-    if (adminUser.blockedUsers.includes(userId)) {
-      return res.status(403).json({ message: "You cannot add a user you have blocked." });
+    // 🛡️ PRIVACY ENFORCEMENT: Bidirectional Block Check for all group members
+    const targetUser = await User.findById(userId).select("blockedUsers");
+    if (!targetUser) {
+      return res.status(404).json({ message: "Target user not found" });
     }
-    if (targetUser.blockedUsers.includes(adminId)) {
-      return res.status(403).json({ message: "You do not have permission to add this user." });
+
+    const blockedUserIdsStr = targetUser.blockedUsers.map(id => String(id));
+    const groupMemberBlockedByTarget = chat.users.some(memberId => blockedUserIdsStr.includes(String(memberId)));
+    if (groupMemberBlockedByTarget) {
+      return res.status(403).json({ message: "You do not have permission to add this user due to privacy restrictions." });
+    }
+
+    const memberBlockingTargetExists = await User.exists({
+      _id: { $in: chat.users },
+      blockedUsers: userId
+    });
+
+    if (memberBlockingTargetExists) {
+      return res.status(403).json({ message: "You do not have permission to add this user due to privacy restrictions." });
     }
 
     const updatedChat = await Chat.findByIdAndUpdate(

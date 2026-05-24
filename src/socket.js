@@ -74,6 +74,8 @@ export const initializeSocket = async (server) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id || decoded.userId || decoded._id;
       socket.tokenExp = decoded.exp; // 🛡️ LEVEL 5 FIX: Store token expiration time
+      socket.data = socket.data || {};
+      socket.data.platform = socket.handshake.auth?.platform || "web";
       
       if (!socket.userId) throw new Error("Malformed JWT payload");
       next();
