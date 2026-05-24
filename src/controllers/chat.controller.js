@@ -354,13 +354,14 @@ export const addToGroup = async (req, res) => {
       return res.status(403).json({ message: "You do not have permission to add this user." });
     }
 
-    chat.users.push(userId);
-    await chat.save();
+    const updatedChat = await Chat.findByIdAndUpdate(
+      chatId,
+      { $addToSet: { users: userId } },
+      { new: true }
+    ).populate("users", "-password").populate("groupAdmin", "-password");
 
     const addedUser = await User.findById(userId);
     await createSystemMessage(chatId, `${req.user.name} added ${addedUser.name}`);
-
-    const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
     const io = getIO();
     io.to(chatId).emit("group_updated", updatedChat);
     res.status(200).json(updatedChat);

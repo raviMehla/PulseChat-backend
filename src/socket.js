@@ -73,6 +73,7 @@ export const initializeSocket = async (server) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id || decoded.userId || decoded._id;
+      socket.tokenExp = decoded.exp; // 🛡️ LEVEL 5 FIX: Store token expiration time
       
       if (!socket.userId) throw new Error("Malformed JWT payload");
       next();
@@ -93,6 +94,16 @@ export const initializeSocket = async (server) => {
   // ==========================================
   io.on("connection", async (socket) => {
     console.log("🟢 Authenticated socket connected:", socket.userId);
+    
+    // 🛡️ LEVEL 5 FIX: Check token expiration on every incoming socket event packet
+    socket.use((packet, next) => {
+      if (socket.tokenExp && socket.tokenExp * 1000 < Date.now()) {
+        console.warn(`[SECURITY] Socket event rejected for user ${socket.userId}: Token expired.`);
+        socket.disconnect(true);
+        return next(new Error("Token expired"));
+      }
+      next();
+    });
     
     // Register the active connection in our Global Map
     userSocketMap[String(socket.userId)] = socket.id;

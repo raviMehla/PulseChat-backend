@@ -128,6 +128,22 @@ export const updateProfile = async (req, res) => {
       { new: true, runValidators: true }
     ).select("-password").populate("blockedUsers", "_id name username profilePic");
 
+    // 🛡️ LEVEL 5 FIX: Real-Time Identity Sync Broadcasts
+    try {
+      const associatedChats = await Chat.find({ users: req.user._id }).select("_id");
+      const io = getIO();
+      associatedChats.forEach(chat => {
+        io.to(String(chat._id)).emit("user_profile_updated", {
+          userId: req.user._id,
+          name: user.name,
+          profilePic: user.profilePic,
+          bio: user.bio
+        });
+      });
+    } catch (err) {
+      console.error("Failed to broadcast profile update:", err);
+    }
+
     res.status(200).json({ 
       message: "Profile updated successfully", 
       user 
