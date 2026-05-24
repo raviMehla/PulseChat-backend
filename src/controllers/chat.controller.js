@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { 
   accessChatSchema,
   createGroupSchema, 
@@ -12,6 +13,27 @@ import Message from "../models/Message.js";
 import { getIO } from "../socket.js";
 import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
+
+// Helper to extract Cloudinary public ID from URL
+const getPublicIdFromUrl = (url) => {
+  try {
+    const parts = url.split("/upload/");
+    if (parts.length < 2) return null;
+    let path = parts[1];
+    const versionMatch = path.match(/^v\d+\/(.+)$/);
+    if (versionMatch) {
+      path = versionMatch[1];
+    }
+    const dotIndex = path.lastIndexOf(".");
+    if (dotIndex !== -1) {
+      path = path.substring(0, dotIndex);
+    }
+    return path;
+  } catch (error) {
+    console.error("Failed to parse public_id from URL:", url, error);
+    return null;
+  }
+};
 
 // ─────────────────────────────────────────────────────────────
 // CLOUDINARY UPLOAD HELPER (Buffer → Cloud URL)
@@ -54,6 +76,9 @@ export const accessChat = async (req, res) => {
     }
 
     const { userId } = validation.data;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
 
     if (userId === req.user._id.toString()) {
       return res.status(400).json({ message: "Cannot chat with yourself" });
@@ -150,6 +175,11 @@ export const createGroupChat = async (req, res) => {
     const creatorId = req.user._id.toString();
     const uniqueParticipants = Array.from(new Set(users.filter(id => id !== creatorId)));
 
+    const invalidUserIds = uniqueParticipants.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidUserIds.length > 0) {
+      return res.status(400).json({ message: "One or more user IDs are invalid" });
+    }
+
     if (uniqueParticipants.length < 1) {
       return res.status(400).json({ message: "Group requires at least one other participant" });
     }
@@ -238,6 +268,9 @@ export const renameGroup = async (req, res) => {
 export const updateGroupDetails = async (req, res) => {
   try {
     const { chatId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: "Invalid chat ID format" });
+    }
     
     // 1️⃣ Strict Zod Validation
     const validation = updateGroupDetailsSchema.safeParse(req.body);
@@ -293,6 +326,9 @@ export const addToGroup = async (req, res) => {
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
     const { chatId, userId } = validation.data;
+    if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
     const adminId = req.user._id;
 
     const chat = await Chat.findById(chatId);
@@ -340,6 +376,9 @@ export const removeFromGroup = async (req, res) => {
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
     const { chatId, userId } = validation.data;
+    if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
     const chat = await Chat.findById(chatId);
 
     if (!chat) return res.status(404).json({ message: "Chat not found" });
@@ -376,6 +415,9 @@ export const leaveGroup = async (req, res) => {
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
     const { chatId } = validation.data;
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: "Invalid chat ID format" });
+    }
     const chat = await Chat.findById(chatId);
 
     if (!chat) return res.status(404).json({ message: "Chat not found" });
@@ -421,6 +463,9 @@ export const leaveGroup = async (req, res) => {
 export const deleteChat = async (req, res) => {
   try {
     const { chatId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: "Invalid chat ID format" });
+    }
     const callerId = req.user._id;
     
     const chat = await Chat.findById(chatId);
@@ -435,6 +480,50 @@ export const deleteChat = async (req, res) => {
     const isGroupAdmin = chat.isGroup && String(chat.groupAdmin) === String(callerId);
 
     if (isGroupAdmin) {
+      // Find all media messages in this chat
+      const mediaMessages = await Message.find({
+        chat: chatId,
+        messageType: { $in: ["image", "video", "file"] },
+        fileUrl: { $ne: null }
+      });
+
+      if (mediaMessages.length > 0) {
+        const images = [];
+        const videos = [];
+        const raws = [];
+
+        mediaMessages.forEach((msg) => {
+          const publicId = getPublicIdFromUrl(msg.fileUrl);
+          if (publicId) {
+            if (msg.messageType === "image") images.push(publicId);
+            else if (msg.messageType === "video") videos.push(publicId);
+            else raws.push(publicId); // "file" -> "raw"
+          }
+        });
+
+        // Batch delete from Cloudinary
+        const deletePromises = [];
+        if (images.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(images, { resource_type: "image" })
+              .catch(err => console.error("Cloudinary delete images failed:", err))
+          );
+        }
+        if (videos.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(videos, { resource_type: "video" })
+              .catch(err => console.error("Cloudinary delete videos failed:", err))
+          );
+        }
+        if (raws.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(raws, { resource_type: "raw" })
+              .catch(err => console.error("Cloudinary delete files failed:", err))
+          );
+        }
+        await Promise.all(deletePromises);
+      }
+
       // Group admin deletes the entire group — hard delete
       await Message.deleteMany({ chat: chatId });
       await Chat.findByIdAndDelete(chatId);
@@ -468,6 +557,9 @@ export const promoteToAdmin = async (req, res) => {
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
     const { chatId, userId } = validation.data;
+    if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
     const chat = await Chat.findById(chatId);
 
     if (!chat) return res.status(404).json({ message: "Chat not found" });

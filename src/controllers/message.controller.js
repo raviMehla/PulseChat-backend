@@ -12,6 +12,10 @@ import { sendPushNotification } from "../services/notification.service.js";
 // Verifies the requesting user is a member of the chat.
 // Returns the chat document so callers can reuse it; throws 403 if unauthorized.
 const verifyChatMembership = async (chatId, userId, res) => {
+  if (!mongoose.Types.ObjectId.isValid(chatId)) {
+    res.status(400).json({ message: "Invalid chat ID format" });
+    return null;
+  }
   const chat = await Chat.findById(chatId);
   if (!chat) {
     res.status(404).json({ message: "Chat not found" });
@@ -59,9 +63,15 @@ export const sendMessage = async (req, res) => {
       }
     }
 
-    // 3️⃣ Auto-unhide chat for anyone who had soft-deleted it
-    if (chatContext.hiddenFor && chatContext.hiddenFor.length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $set: { hiddenFor: [] } });
+    // 3️⃣ Auto-unhide chat for receivers who had soft-deleted it (hiddenFor)
+    const receiverIds = chatContext.users
+      .map(u => String(u))
+      .filter(id => id !== String(senderId));
+
+    if (receiverIds.length > 0) {
+      await Chat.findByIdAndUpdate(chatId, {
+        $pull: { hiddenFor: { $in: receiverIds } }
+      });
     }
 
     let safeReplyTo = (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) ? replyTo : null;
@@ -89,15 +99,18 @@ export const sendMessage = async (req, res) => {
 
     await Chat.findByIdAndUpdate(chatId, { lastMessage: populatedMessage._id });
 
-    // Update unread counts
-    const chat = await Chat.findById(chatId);
-    chat.users.forEach(user => {
-      const userId = user.toString();
-      if (userId !== req.user._id.toString()) {
-        chat.unreadCount.set(userId, (chat.unreadCount.get(userId) || 0) + 1);
+    // Update unread counts atomically
+    const incUpdate = {};
+    chatContext.users.forEach(user => {
+      const userIdStr = user.toString();
+      if (userIdStr !== senderId.toString()) {
+        incUpdate[`unreadCount.${userIdStr}`] = 1;
       }
     });
-    await chat.save();
+
+    if (Object.keys(incUpdate).length > 0) {
+      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+    }
 
     // 🔥 Real-time emit
     const io = getIO();
@@ -127,9 +140,15 @@ export const sendMediaMessage = async (req, res) => {
     const chatContext = await verifyChatMembership(chatId, senderId, res);
     if (!chatContext) return;
 
-    // 2️⃣ Auto-unhide chat for anyone who had soft-deleted it
-    if (chatContext.hiddenFor && chatContext.hiddenFor.length > 0) {
-      await Chat.findByIdAndUpdate(chatId, { $set: { hiddenFor: [] } });
+    // 2️⃣ Auto-unhide chat for receivers who had soft-deleted it (hiddenFor)
+    const receiverIds = chatContext.users
+      .map(u => String(u))
+      .filter(id => id !== String(senderId));
+
+    if (receiverIds.length > 0) {
+      await Chat.findByIdAndUpdate(chatId, {
+        $pull: { hiddenFor: { $in: receiverIds } }
+      });
     }
 
     // 3️⃣ 🛡️ PRIVACY ENFORCEMENT: Block check BEFORE Cloudinary upload to save bandwidth
@@ -195,14 +214,18 @@ export const sendMediaMessage = async (req, res) => {
 
     await Chat.findByIdAndUpdate(chatId, { lastMessage: populatedMessage._id });
 
-    const chat = await Chat.findById(chatId);
-    chat.users.forEach(user => {
-      const userId = user.toString();
-      if (userId !== req.user._id.toString()) {
-        chat.unreadCount.set(userId, (chat.unreadCount.get(userId) || 0) + 1);
+    // Update unread counts atomically
+    const incUpdate = {};
+    chatContext.users.forEach(user => {
+      const userIdStr = user.toString();
+      if (userIdStr !== senderId.toString()) {
+        incUpdate[`unreadCount.${userIdStr}`] = 1;
       }
     });
-    await chat.save();
+
+    if (Object.keys(incUpdate).length > 0) {
+      await Chat.findByIdAndUpdate(chatId, { $inc: incUpdate });
+    }
 
     const io = getIO();
     io.to(chatId).emit("message_received", populatedMessage);
@@ -223,6 +246,9 @@ export const markMessagesAsRead = async (req, res) => {
   try {
     const { chatId } = req.body;
     if (!chatId) return res.status(400).json({ message: "ChatId required" });
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: "Invalid chat ID format" });
+    }
 
     await Message.updateMany(
       { chat: chatId, readBy: { $ne: req.user._id } },
@@ -251,6 +277,9 @@ export const deleteMessage = async (req, res) => {
     const { messageId } = req.params;
     
     if (!messageId) return res.status(400).json({ message: "MessageId required in URL parameters" });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
+    }
 
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
@@ -332,6 +361,9 @@ export const reactToMessage = async (req, res) => {
   try {
     const { messageId, emoji } = req.body;
     if (!messageId || !emoji) return res.status(400).json({ message: "messageId and emoji required" });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
+    }
 
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
