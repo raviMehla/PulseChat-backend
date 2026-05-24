@@ -198,6 +198,7 @@ export const initializeSocket = async (server) => {
 
       const targetSockets = await io.in(String(userToCall)).fetchSockets();
       if (targetSockets.length > 0) {
+        socket.activeCallTarget = String(userToCall);
         io.to(String(userToCall)).emit("incoming_call", { from, callerName, type, chatId });
       } else {
         socket.emit("call_rejected", { reason: "offline" });
@@ -206,16 +207,19 @@ export const initializeSocket = async (server) => {
 
     // 🛡️ ARCHITECTURAL FIX: User B Accepts the call!
     socket.on("accept_call", ({ to }) => {
+      socket.activeCallTarget = String(to);
       io.to(String(to)).emit("call_accepted"); 
     });
 
     // 2. User B declines the call
     socket.on("reject_call", ({ to }) => {
+      socket.activeCallTarget = null;
       io.to(String(to)).emit("call_rejected", { reason: "declined" });
     });
 
     // 3. User A cancels the call before User B answers
     socket.on("cancel_call", ({ to }) => {
+      socket.activeCallTarget = null;
       io.to(String(to)).emit("call_cancelled");
     });
 
@@ -243,6 +247,11 @@ export const initializeSocket = async (server) => {
       console.log("🔴 Socket disconnected:", socket.userId);
       typingCooldowns.delete(socket.id);
       deliveryCooldowns.delete(socket.id);
+
+      if (socket.activeCallTarget) {
+        io.to(socket.activeCallTarget).emit("call_cancelled");
+        socket.activeCallTarget = null;
+      }
 
       if (userSocketMap[String(socket.userId)] === socket.id) {
         delete userSocketMap[String(socket.userId)];

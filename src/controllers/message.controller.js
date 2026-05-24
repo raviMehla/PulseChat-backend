@@ -255,11 +255,9 @@ export const markMessagesAsRead = async (req, res) => {
       { $push: { readBy: req.user._id } }
     );
 
-    const chat = await Chat.findById(chatId);
-    if (chat && chat.unreadCount) {
-      chat.unreadCount.set(req.user._id.toString(), 0);
-      await chat.save();
-    }
+    await Chat.findByIdAndUpdate(chatId, {
+      $set: { [`unreadCount.${String(req.user._id)}`]: 0 }
+    });
 
     const io = getIO();
     io.to(chatId).emit("messages_read", { chatId, userId: req.user._id });

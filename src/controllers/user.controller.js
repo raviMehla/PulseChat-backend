@@ -97,7 +97,12 @@ export const updateProfile = async (req, res) => {
     // 2️⃣ Map validated text fields
     if (name) updatePayload.name = name;
     if (bio) updatePayload.bio = bio;
-    if (settings) updatePayload.settings = settings; // Note: Ensure frontend sends this as stringified JSON if using FormData
+    if (settings) {
+      if (settings.theme) updatePayload["settings.theme"] = settings.theme;
+      if (settings.notificationsEnabled !== undefined) {
+        updatePayload["settings.notificationsEnabled"] = settings.notificationsEnabled;
+      }
+    }
 
     // 3️⃣ File Handling — stream buffer to Cloudinary (memoryStorage has no .path)
     if (req.file) {

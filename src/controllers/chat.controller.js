@@ -442,6 +442,51 @@ export const leaveGroup = async (req, res) => {
 
     // Delete if empty
     if (chat.users.length === 0) {
+      // Find all media messages in this chat
+      const mediaMessages = await Message.find({
+        chat: chatId,
+        messageType: { $in: ["image", "video", "file"] },
+        fileUrl: { $ne: null }
+      });
+
+      if (mediaMessages.length > 0) {
+        const images = [];
+        const videos = [];
+        const raws = [];
+
+        mediaMessages.forEach((msg) => {
+          const publicId = getPublicIdFromUrl(msg.fileUrl);
+          if (publicId) {
+            if (msg.messageType === "image") images.push(publicId);
+            else if (msg.messageType === "video") videos.push(publicId);
+            else raws.push(publicId); // "file" -> "raw"
+          }
+        });
+
+        // Batch delete from Cloudinary
+        const deletePromises = [];
+        if (images.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(images, { resource_type: "image" })
+              .catch(err => console.error("Cloudinary empty group delete images failed:", err))
+          );
+        }
+        if (videos.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(videos, { resource_type: "video" })
+              .catch(err => console.error("Cloudinary empty group delete videos failed:", err))
+          );
+        }
+        if (raws.length > 0) {
+          deletePromises.push(
+            cloudinary.api.delete_resources(raws, { resource_type: "raw" })
+              .catch(err => console.error("Cloudinary empty group delete files failed:", err))
+          );
+        }
+        await Promise.all(deletePromises);
+      }
+
+      await Message.deleteMany({ chat: chatId });
       await Chat.findByIdAndDelete(chatId);
       return res.status(200).json({ message: "Group deleted (empty)" });
     }
