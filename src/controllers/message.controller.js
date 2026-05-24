@@ -100,9 +100,16 @@ export const sendMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" } 
       });
 
-    // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+    // 🛡️ LEVEL 10 FIX: Prevent same-millisecond race conditions using ObjectId chronology check
     await Chat.findOneAndUpdate(
-      { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: newMessage.createdAt } }] },
+      { 
+        _id: chatId, 
+        $or: [
+          { lastMessage: { $exists: false } }, 
+          { lastMessage: null }, 
+          { lastMessage: { $lte: newMessage._id } }
+        ] 
+      },
       { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
     );
 
@@ -253,9 +260,16 @@ export const sendMediaMessage = async (req, res) => {
         populate: { path: "users", select: "_id name username email fcmTokens" }
       });
 
-    // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+    // 🛡️ LEVEL 10 FIX: Prevent same-millisecond race conditions using ObjectId chronology check
     await Chat.findOneAndUpdate(
-      { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: newMessage.createdAt } }] },
+      { 
+        _id: chatId, 
+        $or: [
+          { lastMessage: { $exists: false } }, 
+          { lastMessage: null }, 
+          { lastMessage: { $lte: newMessage._id } }
+        ] 
+      },
       { $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt } }
     );
 

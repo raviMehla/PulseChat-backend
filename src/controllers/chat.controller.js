@@ -60,9 +60,16 @@ const createSystemMessage = async (chatId, text, session = null) => {
 
   const msgDoc = message[0];
 
-  // 🛡️ LEVEL 7 FIX: Race-free atomic conditional lastMessage update
+  // 🛡️ LEVEL 10 FIX: Prevent same-millisecond race conditions using ObjectId chronology check
   await Chat.findOneAndUpdate(
-    { _id: chatId, $or: [{ lastMessageAt: { $exists: false } }, { lastMessageAt: { $lte: msgDoc.createdAt } }] },
+    { 
+      _id: chatId, 
+      $or: [
+        { lastMessage: { $exists: false } }, 
+        { lastMessage: null }, 
+        { lastMessage: { $lte: msgDoc._id } }
+      ] 
+    },
     { $set: { lastMessage: msgDoc._id, lastMessageAt: msgDoc.createdAt } },
     options
   );
@@ -431,8 +438,16 @@ export const removeFromGroup = async (req, res) => {
 
     const updatedChat = await Chat.findById(chatId).populate("users", "-password").populate("groupAdmin", "-password");
 
-    // Emit group update to everyone, and a specific kick event to the removed user
+    // 🛡️ LEVEL 10 FIX: Isolate the removed user's socket connections before broadcasting the group update
     const io = getIO();
+    const targetSockets = await io.in(String(chatId)).fetchSockets();
+    for (const targetSocket of targetSockets) {
+      if (String(targetSocket.userId) === String(userId)) {
+        targetSocket.leave(String(chatId));
+      }
+    }
+
+    // Emit group update to everyone, and a specific kick event to the removed user
     io.to(chatId).emit("group_updated", updatedChat);
     io.to(userId).emit("kicked_from_group", { chatId });
 

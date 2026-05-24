@@ -45,20 +45,40 @@ class OnlineRegistry {
 
   async unregister(userId, socketId) {
     const key = `online:${userId}`;
+    let remaining = 0;
     if (redisClient) {
       try {
-        await redisClient.hDel(key, socketId);
+        const luaScript = `
+          redis.call('HDEL', KEYS[1], ARGV[1])
+          return redis.call('HLEN', KEYS[1])
+        `;
+        const result = await redisClient.eval(luaScript, {
+          keys: [key],
+          arguments: [socketId]
+        });
+        remaining = Number(result);
       } catch (err) {
         console.error("Redis online unregister failed:", err);
+        const userSockets = this.localMap.get(userId);
+        if (userSockets) {
+          userSockets.delete(socketId);
+          remaining = userSockets.size;
+          if (remaining === 0) {
+            this.localMap.delete(userId);
+          }
+        }
+      }
+    } else {
+      const userSockets = this.localMap.get(userId);
+      if (userSockets) {
+        userSockets.delete(socketId);
+        remaining = userSockets.size;
+        if (remaining === 0) {
+          this.localMap.delete(userId);
+        }
       }
     }
-    const userSockets = this.localMap.get(userId);
-    if (userSockets) {
-      userSockets.delete(socketId);
-      if (userSockets.size === 0) {
-        this.localMap.delete(userId);
-      }
-    }
+    return remaining;
   }
 
   async getPlatforms(userId) {
@@ -147,17 +167,20 @@ const processPresenceQueue = async () => {
     tasks[task.userId] = { isOnline: task.isOnline, lastSeen: task.lastSeen || new Date() };
   }
 
-  const updates = Object.entries(tasks).map(async ([userId, state]) => {
-    try {
-      await User.findByIdAndUpdate(userId, { 
-        isOnline: state.isOnline, 
-        lastSeen: state.lastSeen 
-      });
-    } catch (err) {
-      console.error(`[PRESENCE WORKER] Failed to update presence for user ${userId}:`, err.message);
+  const bulkOps = Object.entries(tasks).map(([userId, state]) => ({
+    updateOne: {
+      filter: { _id: userId },
+      update: { $set: { isOnline: state.isOnline, lastSeen: state.lastSeen } }
     }
-  });
-  await Promise.all(updates);
+  }));
+
+  if (bulkOps.length > 0) {
+    try {
+      await User.bulkWrite(bulkOps);
+    } catch (err) {
+      console.error("[PRESENCE WORKER] Failed to execute presence bulkWrite:", err.message);
+    }
+  }
 };
 
 // Run worker loop every 2 seconds
@@ -438,17 +461,15 @@ export const initializeSocket = async (server) => {
         console.error("Call clean up on disconnect failed:", err);
       }
 
-      // 🛡️ LEVEL 7 FIX: Unregister from cluster-wide registry
-      await onlineRegistry.unregister(String(socket.userId), socket.id);
-
-      if (userSocketMap[String(socket.userId)] === socket.id) {
-        delete userSocketMap[String(socket.userId)];
-      }
-
-      // Check if user has other active connections before declaring offline
+      // 🛡️ LEVEL 10 FIX: Atomic unregister and online presence check
       try {
-        const activePlatforms = await onlineRegistry.getPlatforms(String(socket.userId));
-        if (activePlatforms.length === 0) {
+        const remaining = await onlineRegistry.unregister(String(socket.userId), socket.id);
+
+        if (userSocketMap[String(socket.userId)] === socket.id) {
+          delete userSocketMap[String(socket.userId)];
+        }
+
+        if (remaining === 0) {
           io.emit("user_offline", String(socket.userId));
           presenceQueue.push({ userId: socket.userId, isOnline: false, lastSeen: new Date() });
         }
