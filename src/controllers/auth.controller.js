@@ -1,31 +1,152 @@
-import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "../validators/auth.validator.js";
+import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema, sendRegistrationOtpSchema, verifyRegistrationOtpSchema } from "../validators/auth.validator.js";
 import User from "../models/User.js";
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
 import { generateToken } from "../services/token.service.js";
-import { sendPasswordResetOTP } from "../services/email.service.js";
+import { sendPasswordResetOTP, sendRegistrationOTP } from "../services/email.service.js";
+import jwt from "jsonwebtoken";
 
 // ==========================
-// REGISTER USER
+// IN-MEMORY STORE: Registration OTPs
+// { email -> { otp, expiresAt } }
+// ==========================
+const registrationOtpStore = new Map();
+
+// ==========================
+// SEND REGISTRATION OTP — Step 1
+// POST /api/auth/send-registration-otp
+// Body: { email }
+// ==========================
+export const sendRegistrationOtp = async (req, res) => {
+  try {
+    const validation = sendRegistrationOtpSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0]?.message || "Invalid email" });
+    }
+
+    const { email } = validation.data;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if email is already registered
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(400).json({ message: "This email is already registered. Please log in instead." });
+    }
+
+    // Generate secure 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store OTP with 10-minute expiry (overwrite if they resend)
+    registrationOtpStore.set(normalizedEmail, {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes
+    });
+
+    // Send via Brevo
+    await sendRegistrationOTP(normalizedEmail, otp);
+
+    res.status(200).json({
+      message: "Verification code sent to your email. Please check your inbox."
+    });
+
+  } catch (error) {
+    console.error("SendRegistrationOtp Error:", error);
+    res.status(500).json({ message: "Failed to send verification email. Please try again." });
+  }
+};
+
+// ==========================
+// VERIFY REGISTRATION OTP — Step 2
+// POST /api/auth/verify-registration-otp
+// Body: { email, otp }
+// Returns: { emailVerifiedToken }
+// ==========================
+export const verifyRegistrationOtp = async (req, res) => {
+  try {
+    const validation = verifyRegistrationOtpSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ message: validation.error.issues[0]?.message || "Invalid input" });
+    }
+
+    const { email, otp } = validation.data;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const stored = registrationOtpStore.get(normalizedEmail);
+
+    // Generic error to prevent OTP enumeration
+    if (!stored) {
+      return res.status(400).json({ message: "Invalid or expired verification code." });
+    }
+
+    if (Date.now() > stored.expiresAt) {
+      registrationOtpStore.delete(normalizedEmail);
+      return res.status(400).json({ message: "Verification code has expired. Please request a new one." });
+    }
+
+    if (stored.otp !== otp) {
+      return res.status(400).json({ message: "Invalid or expired verification code." });
+    }
+
+    // ✅ OTP is correct — delete it immediately (prevent replay)
+    registrationOtpStore.delete(normalizedEmail);
+
+    // Issue a short-lived signed JWT as proof of email ownership
+    // The email is embedded in the token — the frontend cannot tamper with it
+    const emailVerifiedToken = jwt.sign(
+      { emailVerified: normalizedEmail },
+      process.env.JWT_SECRET,
+      { expiresIn: "15m" }
+    );
+
+    res.status(200).json({
+      message: "Email verified successfully. You can now complete your registration.",
+      emailVerifiedToken
+    });
+
+  } catch (error) {
+    console.error("VerifyRegistrationOtp Error:", error);
+    res.status(500).json({ message: "Failed to verify code. Please try again." });
+  }
+};
+
+// ==========================
+// REGISTER USER — Step 3
+// POST /api/auth/register
+// Body: { name, username, password, emailVerifiedToken }
 // ==========================
 export const registerUser = async (req, res) => {
   try {
     const validation = registerSchema.safeParse(req.body);
 
     if (!validation.success) {
-      // 🛡️ FIX: Use .issues for standard Zod compatibility and added safety
       return res.status(400).json({
         message: validation.error.issues[0]?.message || "Invalid input data"
       });
     }
-    const { name, username, email, password, phone } = validation.data;
 
-    // Check existing user
+    const { name, username, password, emailVerifiedToken } = validation.data;
+
+    // 🛡️ Verify the emailVerifiedToken to extract the email
+    let verifiedEmail;
+    try {
+      const decoded = jwt.verify(emailVerifiedToken, process.env.JWT_SECRET);
+      if (!decoded.emailVerified) {
+        return res.status(400).json({ message: "Invalid email verification token. Please restart the registration process." });
+      }
+      verifiedEmail = decoded.emailVerified;
+    } catch (jwtErr) {
+      return res.status(400).json({ message: "Your email verification has expired or is invalid. Please verify your email again." });
+    }
+
+    // Check existing user using the email from the verified token (tamper-proof)
     const existingUser = await User.findOne({
-      $or: [{ email }, { username }]
+      $or: [{ email: verifiedEmail }, { username }]
     });
 
     if (existingUser) {
-      return res.status(400).json({ message: "Email or Username already exists" });
+      if (existingUser.email === verifiedEmail) {
+        return res.status(400).json({ message: "This email is already registered." });
+      }
+      return res.status(400).json({ message: "Username already taken. Please choose another." });
     }
 
     const hashedPassword = await hashPassword(password);
@@ -33,17 +154,16 @@ export const registerUser = async (req, res) => {
     const user = await User.create({
       name,
       username,
-      email,
+      email: verifiedEmail,  // Always use the email from the verified JWT, not raw input
       password: hashedPassword,
-      phone
-      // tokenVersion defaults to 0 via our updated Mongoose schema
+      // tokenVersion defaults to 0 via schema
     });
 
     // 🛡️ SECURITY: Pass tokenVersion to the token generator
     const token = generateToken(user._id, user.tokenVersion);
 
     res.status(201).json({
-      message: "User registered successfully",
+      message: "Account created successfully! Welcome to PulseChat.",
       token,
       user: {
         id: user._id,
