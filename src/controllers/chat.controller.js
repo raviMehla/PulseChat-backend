@@ -167,10 +167,26 @@ export const fetchChats = async (req, res) => {
       .populate("lastMessage", lastMessageFields)
       .sort({ updatedAt: -1 });
 
-    const formattedChats = chats.map(chat => ({
-      ...chat.toObject(),
-      unreadCount: chat.unreadCount?.get(req.user._id.toString()) || 0
-    }));
+    const formattedChats = chats.map(chat => {
+      const chatObj = chat.toObject();
+
+      // 🛡️ HARD-DELETE RESILIENCE: Filter out null user references (caused by hard-deleting
+      // user documents directly from MongoDB, bypassing the safe-delete pipeline).
+      // Mongoose populates null for references that no longer exist in the User collection.
+      chatObj.users = (chatObj.users || []).filter(u => u !== null && u !== undefined);
+
+      // Flag 1-on-1 chats where the other participant's account no longer exists.
+      // The frontend uses this to render a "Deleted Account" placeholder gracefully.
+      if (!chatObj.isGroup) {
+        const otherUser = chatObj.users.find(u => String(u._id) !== String(req.user._id));
+        chatObj.otherUserDeleted = !otherUser;
+      }
+
+      return {
+        ...chatObj,
+        unreadCount: chat.unreadCount?.get(req.user._id.toString()) || 0
+      };
+    });
 
     res.status(200).json(formattedChats);
   } catch (error) {
