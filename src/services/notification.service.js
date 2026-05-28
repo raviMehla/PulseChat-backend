@@ -115,6 +115,12 @@ export const sendPushNotification = async (chat, sender, content, messageType = 
             chatId: String(chat._id),
             type: "new_message",
           },
+          webpush: {
+            notification: {
+              icon: "/vite.svg",
+              badge: "/vite.svg",
+            }
+          },
           token: token,
         };
 
