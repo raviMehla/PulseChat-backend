@@ -378,13 +378,24 @@ export const initializeSocket = async (server) => {
       socket.join(safeChatId);
       
       try {
-        await Message.updateMany(
-          { chat: safeChatId, sender: { $ne: socket.userId }, deliveredTo: { $ne: socket.userId } },
-          { $push: { deliveredTo: socket.userId } }
+        // 🛡️ FIX: Only mark messages as delivered that were NOT sent by the joining user.
+        // Previously this was pushing socket.userId into deliveredTo for their own messages too,
+        // causing the sender to see ✓✓ (delivered) even when the recipient was offline.
+        const updated = await Message.updateMany(
+          { 
+            chat: safeChatId, 
+            sender: { $ne: socket.userId },      // Only other people's messages
+            deliveredTo: { $ne: socket.userId }  // Not already marked delivered
+          },
+          { $addToSet: { deliveredTo: socket.userId } }
         );
-        io.to(safeChatId).emit("messages_delivered", { chatId: safeChatId, userId: String(socket.userId) });
-      } catch (err) {}
-    });
+        if (updated.modifiedCount > 0) {
+          io.to(safeChatId).emit("messages_delivered", { chatId: safeChatId, userId: String(socket.userId) });
+        }
+      } catch (err) {
+        console.error("[join_chat] deliveredTo update error:", err);
+      }
+    }); // end join_chat
 
     socket.on("typing", ({ chatId }) => {
       if (!chatId) return;
