@@ -193,7 +193,7 @@ export const initializeSocket = async (server) => {
   // check below allows them through while still blocking unknown web origins.
   const allowedOrigins = [
     "http://localhost:5173",
-    "https://pulsechat-frontend-three.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
+    "https://go-pulsechat.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
   ];
 
   io = new Server(server, {

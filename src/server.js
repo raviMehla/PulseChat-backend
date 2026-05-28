@@ -53,7 +53,7 @@ app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 // 🛡️ ARCHITECTURAL UPGRADE: Strict CORS Policy
 const allowedOrigins = [
   "http://localhost:5173", 
-  "https://pulsechat-frontend-three.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
+  "https://go-pulsechat.vercel.app" // ⚠️ REPLACE WITH YOUR EXACT VERCEL URL
 ];
 
 app.use(cors({
