@@ -6,7 +6,10 @@ import { z } from "zod";
 // ==========================================
 export const updateProfileSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").optional(),
+  // Accept both 'bio' (web frontend) and 'about' (mobile APK) — normalize to 'bio'
   bio: z.string().max(150, "Bio cannot exceed 150 characters").optional(),
+  about: z.string().max(150, "About cannot exceed 150 characters").optional(),
+  phone: z.string().max(20).optional().nullable(),
   
   // 🛡️ ARCHITECTURAL UPGRADE: Safely parse stringified JSON from FormData
   settings: z.preprocess(
@@ -26,6 +29,7 @@ export const updateProfileSchema = z.object({
     })
   ).optional(),
 });
+
 
 export const deleteAccountSchema = z.object({
   password: z.string().min(6, "Password is required to confirm deletion"),
@@ -49,10 +53,13 @@ export const updatePrivacySchema = z.object({
 // DISCOVERY / SEARCH VALIDATORS
 // ==========================================
 export const searchUserSchema = z.object({
-  search: z.string()
-    .min(1, "Search keyword is required")
-    .max(50, "Search query is too long to process"),
-});
+  search: z.string().max(50, "Search query is too long to process").optional(),
+  q: z.string().max(50, "Search query is too long to process").optional(),
+}).refine(data => (data.search && data.search.trim().length > 0) || (data.q && data.q.trim().length > 0), {
+  message: "Search keyword is required"
+}).transform(data => ({
+  search: (data.search || data.q).trim()
+}));
 
 // ==========================================
 // DEVICE & NOTIFICATION VALIDATORS

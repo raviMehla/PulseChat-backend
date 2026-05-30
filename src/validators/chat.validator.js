@@ -17,10 +17,13 @@ export const createGroupSchema = z.object({
 });
 
 export const searchUserSchema = z.object({
-  search: z.string()
-    .min(1, "Search query cannot be empty")
-    .max(50, "Search query is too long")
-});
+  search: z.string().max(50, "Search query is too long").optional(),
+  q: z.string().max(50, "Search query is too long").optional(),
+}).refine(data => (data.search && data.search.trim().length > 0) || (data.q && data.q.trim().length > 0), {
+  message: "Search query cannot be empty"
+}).transform(data => ({
+  search: (data.search || data.q).trim()
+}));
 
 export const renameGroupSchema = z.object({
   chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format"),

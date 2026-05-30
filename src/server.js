@@ -22,6 +22,7 @@ import callRoutes from "./routes/call.routes.js";
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
 import { globalLimiter } from "./middleware/rateLimit.middleware.js";
+import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 
 // 🔥 Import the Modular Socket Engine
 import { initializeSocket } from "./socket.js";
@@ -76,12 +77,45 @@ app.use(cors({
   },
   credentials: true // Crucial for cookies/sessions to work across domains
 }));
-app.use(helmet()); 
+// 🛡️ SECURITY HEADERS: Strict Helmet configuration
+app.use(helmet({
+  // Content Security Policy — prevents XSS by restricting resource sources
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"], // unsafe-inline for inline styles only
+      imgSrc: ["'self'", "data:", "https://res.cloudinary.com"], // allow Cloudinary images
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'", "https://res.cloudinary.com"],
+      frameSrc: ["'none'"],
+    },
+  },
+  // Prevent embedding in iframes — protects against clickjacking
+  frameguard: { action: "deny" },
+  // Enforce HTTPS via HSTS (6 months, include subdomains)
+  hsts: {
+    maxAge: 15552000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  // Prevent MIME-type sniffing
+  noSniff: true,
+  // Disable X-Powered-By to hide Express fingerprinting
+  hidePoweredBy: true,
+  // Enable XSS filter in legacy browsers
+  xssFilter: true,
+}));
 app.use(morgan("dev")); 
 app.use(compression()); 
 
 // Global Rate Limiter
 app.use("/api", globalLimiter);
+
+// 🛡️ GLOBAL INPUT SANITIZATION: Strip NoSQL operators & dangerous HTML from all requests
+app.use(sanitizeInputs);
 
 // ==========================================
 // API ROUTES

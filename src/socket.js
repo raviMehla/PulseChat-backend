@@ -17,6 +17,7 @@ const tokenPayloadSchema = z.object({
   id: z.string().optional(),
   userId: z.string().optional(),
   _id: z.string().optional(),
+  tokenVersion: z.number().optional(),
   exp: z.number()
 }).refine(data => data.id || data.userId || data._id, {
   message: "Token must contain a valid user identifier"
@@ -108,17 +109,19 @@ class CallRegistry {
     this.localMap = new Map();
   }
 
-  async setCall(userId, targetId, durationSec = 30) {
+  async setCall(userId, data, durationSec = 30) {
     const key = `call:${userId}`;
+    const value = typeof data === "string" ? { targetId: data } : data;
+    const strValue = JSON.stringify(value);
     if (redisClient) {
       try {
-        await redisClient.set(key, targetId, { EX: durationSec });
+        await redisClient.set(key, strValue, { EX: durationSec });
       } catch (err) {
         console.error("Redis setCall failed, using local backup:", err);
-        this.localMap.set(userId, { targetId, expires: Date.now() + durationSec * 1000 });
+        this.localMap.set(userId, { data: value, expires: Date.now() + durationSec * 1000 });
       }
     } else {
-      this.localMap.set(userId, { targetId, expires: Date.now() + durationSec * 1000 });
+      this.localMap.set(userId, { data: value, expires: Date.now() + durationSec * 1000 });
     }
   }
 
@@ -126,7 +129,8 @@ class CallRegistry {
     const key = `call:${userId}`;
     if (redisClient) {
       try {
-        return await redisClient.get(key);
+        const val = await redisClient.get(key);
+        return val ? JSON.parse(val) : null;
       } catch (err) {
         console.error("Redis getCall failed, checking local backup:", err);
       }
@@ -134,7 +138,7 @@ class CallRegistry {
     const item = this.localMap.get(userId);
     if (item) {
       if (item.expires > Date.now()) {
-        return item.targetId;
+        return item.data;
       }
       this.localMap.delete(userId);
     }
@@ -155,6 +159,31 @@ class CallRegistry {
 }
 
 export const callRegistry = new CallRegistry();
+
+const logMissedCall = async (callerId, receiverId, chatId, type) => {
+  if (!chatId || !callerId || !receiverId) return;
+  try {
+    const systemContent = `Missed ${type || "audio"} call`;
+    const newMessage = await Message.create({
+      chat: chatId,
+      sender: callerId, // 📞 Save the caller as sender
+      content: systemContent,
+      messageType: "system"
+    });
+
+    await Chat.findByIdAndUpdate(chatId, {
+      $set: { lastMessage: newMessage._id, lastMessageAt: newMessage.createdAt }
+    });
+
+    const populated = await Message.findById(newMessage._id).populate("chat sender");
+    
+    const ioInstance = getIO();
+    ioInstance.to(String(callerId)).emit("message_received", populated);
+    ioInstance.to(String(receiverId)).emit("message_received", populated);
+  } catch (err) {
+    console.error("[CALL SYSTEM MESSAGE] Failed to log missed call:", err);
+  }
+};
 
 const presenceQueue = [];
 
@@ -249,7 +278,7 @@ export const initializeSocket = async (server) => {
   // ==========================================
   // SOCKET.IO AUTHENTICATION
   // ==========================================
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) {
       console.warn("Socket connection rejected: No token provided.");
@@ -266,7 +295,21 @@ export const initializeSocket = async (server) => {
       }
 
       const validatedPayload = parseResult.data;
-      socket.userId = validatedPayload.id || validatedPayload.userId || validatedPayload._id;
+      const userId = validatedPayload.id || validatedPayload.userId || validatedPayload._id;
+
+      // 🛡️ SECURITY: Verify user existence, deletion status, and token version in database
+      const user = await User.findById(userId).select("tokenVersion isDeleted");
+      if (!user) {
+        throw new Error("User not found");
+      }
+      if (user.isDeleted) {
+        throw new Error("Account has been deleted");
+      }
+      if (validatedPayload.tokenVersion !== undefined && user.tokenVersion !== validatedPayload.tokenVersion) {
+        throw new Error("Session expired or revoked");
+      }
+
+      socket.userId = userId;
       socket.tokenExp = validatedPayload.exp;
       socket.data = socket.data || {};
       socket.data.platform = socket.handshake.auth?.platform || "web";
@@ -332,6 +375,45 @@ export const initializeSocket = async (server) => {
       userChats.forEach(chat => socket.join(String(chat._id)));
     } catch (error) {
       console.error("Failed to auto-join rooms:", error);
+    }
+
+    // 📞 Check for offline missed calls
+    try {
+      const userDoc = await User.findById(socket.userId).select("lastSeen");
+      if (userDoc && userDoc.lastSeen) {
+        const previousLastSeen = userDoc.lastSeen;
+        
+        // Find chats the user is in
+        const userChats = await Chat.find({ users: socket.userId }).select("_id");
+        const chatIds = userChats.map(c => c._id);
+        
+        if (chatIds.length > 0) {
+          // Find missed calls since they went offline (max 7 days ago, limit 10)
+          const missedCalls = await Message.find({
+            chat: { $in: chatIds },
+            messageType: "system",
+            content: { $regex: /^Missed (audio|video) call/i },
+            sender: { $ne: socket.userId },
+            createdAt: { $gt: previousLastSeen, $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+          })
+          .sort({ createdAt: 1 })
+          .limit(10)
+          .populate("sender", "name username profilePic");
+          
+          if (missedCalls.length > 0) {
+            socket.emit("offline_missed_calls", missedCalls.map(m => ({
+              _id: m._id,
+              chatId: m.chat,
+              callerName: m.sender?.name || m.sender?.username || "Someone",
+              callerAvatar: m.sender?.profilePic?.url || "",
+              type: m.content.toLowerCase().includes("video") ? "video" : "audio",
+              createdAt: m.createdAt
+            })));
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[SOCKET] Error checking offline missed calls on connect:", err);
     }
 
     const handleUserOnlineStatus = async () => {
@@ -449,23 +531,37 @@ export const initializeSocket = async (server) => {
 
       const targetSockets = await io.in(String(userToCall)).fetchSockets();
       if (targetSockets.length > 0) {
-        await callRegistry.setCall(String(socket.userId), String(userToCall), 30);
-        await callRegistry.setCall(String(userToCall), String(socket.userId), 30);
+        const callData = { targetId: String(userToCall), chatId, type, status: "ringing", callerId: String(socket.userId) };
+        await callRegistry.setCall(String(socket.userId), callData, 30);
+        await callRegistry.setCall(String(userToCall), { ...callData, targetId: String(socket.userId) }, 30);
         io.to(String(userToCall)).emit("incoming_call", { from, callerName, type, chatId });
       } else {
         socket.emit("call_rejected", { reason: "offline" });
+        await logMissedCall(socket.userId, userToCall, chatId, type);
       }
     });
 
     // 🛡️ ARCHITECTURAL FIX: User B Accepts the call!
     socket.on("accept_call", async ({ to }) => {
-      await callRegistry.setCall(String(socket.userId), String(to), 7200);
-      await callRegistry.setCall(String(to), String(socket.userId), 7200);
+      const activeCall = await callRegistry.getCall(String(socket.userId));
+      const chatId = activeCall?.chatId || null;
+      const type = activeCall?.type || "audio";
+      const callerId = activeCall?.callerId || to;
+
+      const connectedDataA = { targetId: String(to), chatId, type, status: "connected", callerId };
+      const connectedDataB = { targetId: String(socket.userId), chatId, type, status: "connected", callerId };
+
+      await callRegistry.setCall(String(socket.userId), connectedDataA, 7200);
+      await callRegistry.setCall(String(to), connectedDataB, 7200);
       io.to(String(to)).emit("call_accepted"); 
     });
 
     // 2. User B declines the call
     socket.on("reject_call", async ({ to }) => {
+      const activeCall = await callRegistry.getCall(String(socket.userId));
+      if (activeCall && activeCall.status === "ringing") {
+        await logMissedCall(activeCall.callerId, socket.userId, activeCall.chatId, activeCall.type);
+      }
       await callRegistry.clearCall(String(socket.userId));
       await callRegistry.clearCall(String(to));
       io.to(String(to)).emit("call_rejected", { reason: "declined" });
@@ -473,6 +569,10 @@ export const initializeSocket = async (server) => {
 
     // 3. User A cancels the call before User B answers
     socket.on("cancel_call", async ({ to }) => {
+      const activeCall = await callRegistry.getCall(String(socket.userId));
+      if (activeCall && activeCall.status === "ringing") {
+        await logMissedCall(socket.userId, to, activeCall.chatId, activeCall.type);
+      }
       await callRegistry.clearCall(String(socket.userId));
       await callRegistry.clearCall(String(to));
       io.to(String(to)).emit("call_cancelled");
@@ -521,11 +621,19 @@ export const initializeSocket = async (server) => {
       deliveryCooldowns.delete(socket);
 
       try {
-        const activeCallTarget = await callRegistry.getCall(String(socket.userId));
-        if (activeCallTarget) {
-          io.to(activeCallTarget).emit("call_cancelled");
+        const activeCall = await callRegistry.getCall(String(socket.userId));
+        if (activeCall) {
+          const target = activeCall.targetId;
+          io.to(target).emit("call_cancelled");
+          
+          if (activeCall.status === "ringing") {
+            const callerId = activeCall.callerId;
+            const receiverId = String(socket.userId) === callerId ? target : String(socket.userId);
+            await logMissedCall(callerId, receiverId, activeCall.chatId, activeCall.type);
+          }
+          
           await callRegistry.clearCall(String(socket.userId));
-          await callRegistry.clearCall(activeCallTarget);
+          await callRegistry.clearCall(target);
         }
       } catch (err) {
         console.error("Call clean up on disconnect failed:", err);

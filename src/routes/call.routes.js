@@ -61,4 +61,20 @@ router.get("/ice-servers", protect, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/call/log
+ * 
+ * Stores a call history record submitted by the mobile APK.
+ * Body: { receiverId, type: "audio"|"video", duration, status: "missed"|"incoming"|"outgoing" }
+ * 
+ * NOTE: Call history is currently ephemeral (not persisted to DB).
+ * A CallLog model can be added in a future iteration.
+ */
+router.post("/log", protect, (req, res) => {
+  // Accept and acknowledge the log — mobile APK expects 200 to stop retrying
+  const { receiverId, type, duration, status } = req.body;
+  console.log(`[CALL LOG] User ${req.user._id} → ${receiverId} | type:${type} | status:${status} | duration:${duration}`);
+  res.status(200).json({ success: true, message: "Call log recorded" });
+});
+
 export default router;

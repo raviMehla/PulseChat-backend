@@ -42,9 +42,51 @@ const userSchema = new mongoose.Schema(
 
     // 🟢 Forgot Password Pipeline
     resetPasswordOtp: { type: String, default: null },
-    resetPasswordOtpExpires: { type: Date, default: null }
+    resetPasswordOtpExpires: { type: Date, default: null },
+
+    // 🛡️ SECURITY: Lockout Pipeline
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date, default: null }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    // ─────────────────────────────────────────────────────────────
+    // toJSON TRANSFORM: Automatically normalizes every user document
+    // when serialized as JSON (res.json(), JSON.stringify(), populate)
+    //
+    // KEY CHANGE: profilePic stored as plain URL string in DB, but
+    // mobile APK expects { url: string } object format everywhere.
+    // This transform fires on EVERY JSON response — including populated
+    // chat.users, message.sender, search results — so no controller
+    // needs a manual fix.
+    // ─────────────────────────────────────────────────────────────
+    toJSON: {
+      transform: (_doc, ret) => {
+        // Normalize profilePic: string → { url }
+        if (typeof ret.profilePic === "string") {
+          ret.profilePic = { url: ret.profilePic };
+        } else if (!ret.profilePic) {
+          ret.profilePic = { url: "" };
+        }
+
+        // Expose _id as both _id and id for frontend compatibility
+        ret.id = ret._id;
+
+        // Remove sensitive server-only fields from all API responses
+        delete ret.password;
+        delete ret.tokenVersion;
+        delete ret.deletionOtp;
+        delete ret.deletionOtpExpires;
+        delete ret.resetPasswordOtp;
+        delete ret.resetPasswordOtpExpires;
+        delete ret.loginAttempts;
+        delete ret.lockUntil;
+        delete ret.fcmTokens;
+
+        return ret;
+      }
+    }
+  }
 );
 
 const User = mongoose.model("User", userSchema);

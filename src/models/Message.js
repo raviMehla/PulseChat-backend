@@ -25,7 +25,7 @@ const messageSchema = new mongoose.Schema(
     // MEDIA SUPPORT
     messageType: {
       type: String,
-      enum: ["text", "image", "video", "file", "system"],
+      enum: ["text", "image", "video", "audio", "voice", "file", "system"],
       default: "text"
     },
     isDeleted: {
@@ -39,12 +39,40 @@ const messageSchema = new mongoose.Schema(
       default: false
     },
 
+    isPinned: {
+      type: Boolean,
+      default: false
+    },
+
+    isStarred: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+      }
+    ],
+
+    isEdited: {
+      type: Boolean,
+      default: false
+    },
+
+    editedAt: {
+      type: Date,
+      default: null
+    },
+
     fileUrl: {
       type: String,
       default: null
     },
 
     fileName: {
+      type: String,
+      default: null
+    },
+
+    // Voice/audio message duration (e.g. "0:12" or "15" seconds)
+    duration: {
       type: String,
       default: null
     },

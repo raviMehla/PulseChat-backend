@@ -10,7 +10,11 @@ import {
   reactToMessage,
   sendMediaMessage,
   searchMessages,
-  getMessageContext
+  getMessageContext,
+  editMessage,
+  pinMessage,
+  starMessage,
+  getStarredMessages
 } from "../controllers/message.controller.js";
 
 const router = express.Router();
@@ -36,6 +40,10 @@ router.put("/react", protect, reactToMessage);
 // 🔥 CRITICAL: Deletion Route
 router.delete("/:messageId", protect, deleteMessage);
 
+router.put("/:messageId/edit", protect, editMessage);
+router.put("/:messageId/pin", protect, pinMessage);
+router.put("/:messageId/star", protect, starMessage);
+
 // =====================================
 // FETCHING & QUERIES (GET)
 // 🚨 CRITICAL ORDERING: Specific paths must go BEFORE generic parameters
@@ -44,10 +52,13 @@ router.delete("/:messageId", protect, deleteMessage);
 // 1. Search Route
 router.get("/search/:chatId", protect, heavyTaskLimiter, searchMessages);
 
-// 2. 🛡️ CONTEXT FIX: Realigned to match frontend /:chatId/context/:messageId
+// 2. Starred Messages Route (must come BEFORE /:chatId to avoid ambiguity)
+router.get("/starred", protect, getStarredMessages);
+
+// 3. 🛡️ CONTEXT FIX: Realigned to match frontend /:chatId/context/:messageId
 router.get("/:chatId/context/:messageId", protect, getMessageContext);
 
-// 3. Generic Fetch Route (Must remain at the very bottom)
+// 4. Generic Fetch Route (Must remain at the very bottom)
 router.get("/:chatId", protect, getMessages);
 
 export default router;

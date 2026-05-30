@@ -7,8 +7,14 @@ const objectIdRegex = /^[0-9a-fA-F]{24}$/;
 // SEND MESSAGE SCHEMA
 // =====================================
 export const sendMessageSchema = z.object({
-  content: z.string().min(1, "Message cannot be empty"),
+  content: z.string().optional().nullable(),
   chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format"),
+  messageType: z.enum(["text", "image", "video", "audio", "voice", "file", "system"]).optional(),
+  fileUrl: z.string().optional().nullable(),
+  fileName: z.string().optional().nullable(),
+  // duration: accept string (e.g. "0:12") or number (seconds) from APK
+  duration: z.union([z.string(), z.number()]).optional().nullable(),
+  isForwarded: z.boolean().optional(),
   replyTo: z.string()
     .refine(val => val === "" || objectIdRegex.test(val), {
       message: "Invalid replyTo ID format"
@@ -34,6 +40,6 @@ export const searchMessageSchema = z.object({
 export const getMessageHistorySchema = z.object({
   // Ensure the cursor is a valid ISO-8601 datetime string to prevent NoSQL injection on the $lt operator
   cursor: z.string().datetime().optional().nullable(),
-  // Limit is passed as a string in query params, so we validate the string regex and cast to Number
-  limit: z.string().regex(/^\d+$/).transform(Number).optional()
+  // Limit is passed as a string in query params, but could be parsed as a number. We support both.
+  limit: z.union([z.string().regex(/^\d+$/).transform(Number), z.number()]).optional()
 });

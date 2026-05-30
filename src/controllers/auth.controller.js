@@ -165,12 +165,18 @@ export const registerUser = async (req, res) => {
     res.status(201).json({
       message: "Account created successfully! Welcome to PulseChat.",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email
-      }
+      _id: user._id,
+      id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      profilePic: { url: user.profilePic || "" },
+      privacy: user.privacy || { lastSeen: "everyone", profilePhoto: "everyone" },
+      blockedUsers: [],
+      settings: user.settings || {},
+      about: user.bio || "",
+      bio: user.bio || "",
+      isOnline: true
     });
 
   } catch (error) {
@@ -205,6 +211,14 @@ export const loginUser = async (req, res) => {
       ]
     });
 
+    // 🛡️ SECURITY: Lockout Check
+    if (user && user.lockUntil && user.lockUntil > Date.now()) {
+      const remainingMinutes = Math.ceil((user.lockUntil - Date.now()) / (60 * 1000));
+      return res.status(403).json({
+        message: `Account is temporarily locked. Please try again in ${remainingMinutes} minute${remainingMinutes !== 1 ? 's' : ''}.`
+      });
+    }
+
     let isMatch = false;
     if (user) {
       isMatch = await comparePassword(password, user.password);
@@ -214,11 +228,25 @@ export const loginUser = async (req, res) => {
     }
 
     if (!user || !isMatch) {
+      if (user) {
+        user.loginAttempts = (user.loginAttempts || 0) + 1;
+        if (user.loginAttempts >= 5) {
+          user.lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 min cooldown
+        }
+        await user.save();
+      }
       return res.status(400).json({ message: "Invalid credentials. Please check your username/email/phone and password." });
     }
 
     if (user.isDeleted) {
       return res.status(403).json({ message: "This account has been deleted. Please register a new account to continue." });
+    }
+
+    // Reset login attempts on successful login
+    if (user.loginAttempts > 0 || user.lockUntil) {
+      user.loginAttempts = 0;
+      user.lockUntil = null;
+      await user.save();
     }
 
     // If 2FA enabled (future extension)
@@ -235,12 +263,20 @@ export const loginUser = async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email
-      }
+      _id: user._id,
+      id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      phone: user.phone || null,
+      profilePic: { url: user.profilePic || "" },
+      privacy: user.privacy || { lastSeen: "everyone", profilePhoto: "everyone" },
+      blockedUsers: user.blockedUsers || [],
+      settings: user.settings || {},
+      about: user.bio || "",
+      bio: user.bio || "",
+      isOnline: true,
+      lastSeen: user.lastSeen
     });
 
   } catch (error) {

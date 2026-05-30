@@ -182,7 +182,7 @@ export const sendMessage = async (req, res) => {
 // =====================================
 export const sendMediaMessage = async (req, res) => {
   try {
-    const { chatId, replyTo } = req.body;
+    const { chatId, replyTo, content, messageType: bodyMessageType, duration } = req.body;
     const senderId = req.user._id;
 
     if (!req.file || !chatId) return res.status(400).json({ message: "File and chatId are required" });
@@ -228,9 +228,12 @@ export const sendMediaMessage = async (req, res) => {
       io.to(receiverIds).emit("chat_unhidden", { chatId });
     }
 
-    let messageType = "file";
-    if (req.file.mimetype.startsWith("image")) messageType = "image";
-    else if (req.file.mimetype.startsWith("video")) messageType = "video";
+    let messageType = bodyMessageType || "file";
+    if (!bodyMessageType) {
+      if (req.file.mimetype.startsWith("image")) messageType = "image";
+      else if (req.file.mimetype.startsWith("video")) messageType = "video";
+      else if (req.file.mimetype.startsWith("audio")) messageType = "audio";
+    }
 
     const uploadFromBuffer = () =>
       new Promise((resolve, reject) => {
@@ -256,9 +259,11 @@ export const sendMediaMessage = async (req, res) => {
     const newMessage = await Message.create({
       sender: senderId,
       chat: chatId,
+      content: content || null,
       messageType,
       fileUrl: result.secure_url,
       fileName: req.file.originalname,
+      duration: duration || null,
       replyTo: safeReplyTo,
       isForwarded: req.body.isForwarded === true
     });
@@ -614,12 +619,12 @@ export const getMessageContext = async (req, res) => {
     if (!chatDoc) return;
 
     const targetMessage = await Message.findById(messageId)
-      .populate("sender", "name username email")
+      .populate("sender", "name username profilePic")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username profilePic" }
       });
 
     if (!targetMessage) return res.status(404).json({ message: "Target message not found" });
@@ -633,12 +638,12 @@ export const getMessageContext = async (req, res) => {
     })
       .sort({ _id: -1 })
       .limit(15)
-      .populate("sender", "name username email")
+      .populate("sender", "name username profilePic")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username profilePic" }
       });
 
     const newerMessages = await Message.find({
@@ -647,12 +652,12 @@ export const getMessageContext = async (req, res) => {
     })
       .sort({ _id: 1 })
       .limit(15)
-      .populate("sender", "name username email")
+      .populate("sender", "name username profilePic")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username profilePic" }
       });
 
     const contextSlice = [
@@ -664,6 +669,165 @@ export const getMessageContext = async (req, res) => {
     res.status(200).json(contextSlice);
   } catch (error) {
     console.error("Context Fetch Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// EDIT MESSAGE
+// =====================================
+export const editMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { content } = req.body;
+
+    if (!content || content.trim() === "") {
+      return res.status(400).json({ message: "Content is required" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    if (String(message.sender) !== String(req.user._id)) {
+      return res.status(403).json({ message: "Not authorized to edit this message" });
+    }
+
+    if (message.isDeleted) {
+      return res.status(400).json({ message: "Cannot edit a deleted message" });
+    }
+
+    if (message.messageType && message.messageType !== "text") {
+      return res.status(400).json({ message: "Only text messages can be edited" });
+    }
+
+    message.content = content.trim();
+    message.isEdited = true;
+    message.editedAt = new Date();
+    await message.save();
+
+    const populatedMessage = await Message.findById(message._id)
+      .populate("sender", "name username profilePic")
+      .populate({
+        path: "replyTo",
+        strictPopulate: false,
+        select: "content messageType fileUrl fileName sender isDeleted",
+        populate: { path: "sender", select: "name username profilePic" }
+      });
+
+    const io = getIO();
+    io.to(message.chat.toString()).emit("message_edited", populatedMessage);
+
+    res.status(200).json({ success: true, data: populatedMessage });
+  } catch (error) {
+    console.error("Edit Message Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// PIN MESSAGE
+// =====================================
+export const pinMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    const chatId = message.chat.toString();
+    const chatDoc = await Chat.findById(chatId);
+    if (!chatDoc || !chatDoc.users.some(u => String(u) === String(req.user._id))) {
+      return res.status(403).json({ message: "Not authorized to pin in this chat" });
+    }
+
+    message.isPinned = !message.isPinned;
+    await message.save();
+
+    const io = getIO();
+    io.to(chatId).emit("message_pinned", { messageId: message._id, isPinned: message.isPinned, chatId });
+
+    res.status(200).json({ success: true, isPinned: message.isPinned });
+  } catch (error) {
+    console.error("Pin Message Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// STAR MESSAGE
+// =====================================
+export const starMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    const chatId = message.chat.toString();
+    const chatDoc = await Chat.findById(chatId);
+    if (!chatDoc || !chatDoc.users.some(u => String(u) === String(userId))) {
+      return res.status(403).json({ message: "Not authorized to star in this chat" });
+    }
+
+    const isStarred = message.isStarred.some(u => String(u) === String(userId));
+    if (isStarred) {
+      message.isStarred = message.isStarred.filter(u => String(u) !== String(userId));
+    } else {
+      message.isStarred.push(userId);
+    }
+    await message.save();
+
+    res.status(200).json({ success: true, isStarred: !isStarred });
+  } catch (error) {
+    console.error("Star Message Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// GET STARRED MESSAGES FOR CURRENT USER
+// =====================================
+export const getStarredMessages = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Find all messages starred by this user, across all chats they are members of
+    const starredMessages = await Message.find({
+      isStarred: userId,
+      isDeleted: { $ne: true },
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .populate("sender", "name username profilePic")
+      .populate({
+        path: "chat",
+        select: "chatName isGroup users",
+        populate: { path: "users", select: "_id name username" }
+      })
+      .lean();
+
+    // Authorization guard: only return messages from chats the user is a member of
+    const authorizedMessages = starredMessages.filter(msg => {
+      if (!msg.chat) return false;
+      return msg.chat.users?.some(u => String(u._id) === String(userId));
+    });
+
+    res.status(200).json(authorizedMessages);
+  } catch (error) {
+    console.error("Get Starred Messages Error:", error);
     res.status(500).json({ message: error.message });
   }
 };

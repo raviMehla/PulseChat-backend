@@ -51,6 +51,21 @@ import {
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
 import { generateToken } from "../services/token.service.js";
 
+// ─────────────────────────────────────────────────────────────
+// NORMALIZE USER HELPER
+// Transforms a Mongoose user document into a safe API response.
+// Converts profilePic (stored as plain URL string) → { url } object
+// so the mobile APK's profilePic?.url pattern works everywhere.
+// ─────────────────────────────────────────────────────────────
+const normalizeUser = (userDoc) => {
+  const obj = typeof userDoc.toObject === "function" ? userDoc.toObject() : { ...userDoc };
+  if (obj.profilePic && typeof obj.profilePic === "string") {
+    obj.profilePic = { url: obj.profilePic };
+  } else if (!obj.profilePic) {
+    obj.profilePic = { url: "" };
+  }
+  return obj;
+};
 
 // =====================================
 // GET USER PROFILE
@@ -60,7 +75,7 @@ export const getProfile = async (req, res) => {
     const user = await User.findById(req.user._id).select("-password").populate("blockedUsers", "_id name username profilePic");
     if (!user) return res.status(404).json({ message: "User not found" });
     
-    res.status(200).json(user);
+    res.status(200).json(normalizeUser(user));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -91,18 +106,22 @@ export const updateProfile = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
-    const { name, bio, settings } = validation.data;
+    const { name, bio, about, phone, settings } = validation.data;
     const updatePayload = Object.create(null);
 
     // 2️⃣ Map validated text fields
     if (name) updatePayload.name = name;
-    if (bio) updatePayload.bio = bio;
+    // Accept 'bio' (web) or 'about' (mobile APK) — both map to the same DB field
+    if (bio !== undefined) updatePayload.bio = bio;
+    else if (about !== undefined) updatePayload.bio = about;
+    if (phone !== undefined) updatePayload.phone = phone;
     if (settings) {
       if (settings.theme) updatePayload["settings.theme"] = settings.theme;
       if (settings.notificationsEnabled !== undefined) {
         updatePayload["settings.notificationsEnabled"] = settings.notificationsEnabled;
       }
     }
+
 
     // 3️⃣ File Handling — stream buffer to Cloudinary (memoryStorage has no .path)
     if (req.file) {
@@ -136,7 +155,7 @@ export const updateProfile = async (req, res) => {
         io.to(String(chat._id)).emit("user_profile_updated", {
           userId: req.user._id,
           name: user.name,
-          profilePic: user.profilePic,
+          profilePic: user.profilePic ? { url: user.profilePic } : { url: "" },
           bio: user.bio
         });
       });
@@ -146,7 +165,7 @@ export const updateProfile = async (req, res) => {
 
     res.status(200).json({ 
       message: "Profile updated successfully", 
-      user 
+      user: normalizeUser(user)
     });
   } catch (error) {
     console.error("Unified Profile Update Error:", error);
@@ -309,7 +328,8 @@ export const searchUsers = async (req, res) => {
       ]
     }).select("-password").limit(20); // Cap at 20 to protect memory/bandwidth
 
-    res.status(200).json(users);
+    // Normalize profilePic to { url } format for mobile APK compatibility
+    res.status(200).json(users.map(normalizeUser));
   } catch (error) {
     console.error("User Search Error:", error);
     res.status(500).json({ message: "Internal server error during user search" });
