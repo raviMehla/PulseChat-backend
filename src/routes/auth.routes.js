@@ -1,9 +1,10 @@
 import express from "express";
-import { registerUser, loginUser, forgotPassword, resetPassword, sendRegistrationOtp, verifyRegistrationOtp } from "../controllers/auth.controller.js";
+import { registerUser, loginUser, forgotPassword, resetPassword, sendRegistrationOtp, verifyRegistrationOtp, getSalts } from "../controllers/auth.controller.js";
 import { authLimiter } from "../middleware/rateLimit.middleware.js";
 
 const router = express.Router();
 
+router.get("/salts", getSalts);
 router.post("/login", authLimiter, loginUser);
 
 // ── Registration Flow (3-step email OTP gated) ──

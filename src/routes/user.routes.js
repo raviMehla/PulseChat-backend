@@ -14,7 +14,9 @@ import {
   inviteUser,
   registerFcmToken,
   removeFcmToken,
-  exportUserData, requestDeleteOtp, deleteAccount
+  exportUserData, requestDeleteOtp, deleteAccount,
+  getUserPublicKey,
+  getUserBackup
 } from "../controllers/user.controller.js";
 
 const router = express.Router();
@@ -52,6 +54,12 @@ router.put("/block", toggleBlockUser);
 router.get("/search", searchUsers);
 router.post("/invite", inviteUser);
 router.get("/status/:id", getUserStatus);
+
+// ==========================================
+// E2EE KEY MANAGEMENT
+// ==========================================
+router.get("/keys/backup", getUserBackup);
+router.get("/keys/:userId", getUserPublicKey);
 
 // ==========================================
 // DEVICE & PUSH NOTIFICATIONS

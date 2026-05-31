@@ -228,15 +228,36 @@ export const updatePassword = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
-    const { currentPassword, newPassword } = validation.data;
+    const { 
+      currentAuthToken, 
+      newAuthToken, 
+      newAuthSalt, 
+      newKeySalt, 
+      newKeyIv, 
+      newEncryptedPrivateKey, 
+      newRecoveryEncryptedKey, 
+      newRecoveryKeyIv 
+    } = validation.data;
+    
     const user = await User.findById(req.user._id);
 
-    const isMatch = await comparePassword(currentPassword, user.password);
+    const isMatch = await comparePassword(currentAuthToken, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Incorrect current password" });
     }
 
-    user.password = await hashPassword(newPassword);
+    user.password = await hashPassword(newAuthToken);
+    user.authSalt = newAuthSalt;
+    user.e2ee = {
+      publicKey: user.e2ee.publicKey,
+      encryptedPrivateKey: newEncryptedPrivateKey,
+      keySalt: newKeySalt,
+      keyIv: newKeyIv,
+      keyVersion: (user.e2ee.keyVersion || 1) + 1,
+      recoveryEncryptedKey: newRecoveryEncryptedKey || null,
+      recoveryKeyIv: newRecoveryKeyIv || null,
+      recoveryEnabled: !!newRecoveryEncryptedKey
+    };
     
     // 🛡️ SECURITY: Increment tokenVersion to kill all old sessions on other devices
     user.tokenVersion = (user.tokenVersion || 0) + 1;
@@ -465,11 +486,11 @@ export const deleteAccount = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0]?.message });
     }
 
-    const { password, otp } = validation.data;
+    const { authToken, otp } = validation.data;
     const user = await User.findById(req.user._id);
 
     // 2️⃣ Verify Password & OTP
-    const isMatch = await comparePassword(password, user.password);
+    const isMatch = await comparePassword(authToken, user.password);
     if (!isMatch) return res.status(403).json({ message: "Invalid password" });
 
     if (user.deletionOtp !== otp || user.deletionOtpExpires < Date.now()) {
@@ -548,5 +569,41 @@ export const inviteUser = async (req, res) => {
   } catch (error) {
     console.error("Invite User Error:", error);
     res.status(500).json({ message: "Failed to send invitation", error: error.message });
+  }
+};
+
+// =====================================
+// GET USER PUBLIC KEY
+// =====================================
+export const getUserPublicKey = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select("e2ee.publicKey");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({ publicKey: user.e2ee?.publicKey || null });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch user public key", error: error.message });
+  }
+};
+
+// =====================================
+// GET USER BACKUP (For current user)
+// =====================================
+export const getUserBackup = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select(
+      "+e2ee.encryptedPrivateKey +e2ee.keyIv +e2ee.keySalt"
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({
+      encryptedPrivateKey: user.e2ee?.encryptedPrivateKey || null,
+      keyIv: user.e2ee?.keyIv || null,
+      keySalt: user.e2ee?.keySalt || null
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch backup keys", error: error.message });
   }
 };

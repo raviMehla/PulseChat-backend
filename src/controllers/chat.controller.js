@@ -207,12 +207,20 @@ export const createGroupChat = async (req, res) => {
       }
     }
 
+    if (typeof req.body.encryptedGroupKeys === "string") {
+      try {
+        req.body.encryptedGroupKeys = JSON.parse(req.body.encryptedGroupKeys);
+      } catch (err) {
+        return res.status(400).json({ message: "Invalid encryptedGroupKeys format" });
+      }
+    }
+
     const validation = createGroupSchema.safeParse(req.body);
     if (!validation.success) {
       return res.status(400).json({ message: validation.error.issues[0].message });
     }
 
-    const { name, users, description } = validation.data;
+    const { name, users, description, encryptedGroupKeys } = validation.data;
     const creatorId = req.user._id.toString();
     const uniqueParticipants = Array.from(new Set(users.filter(id => id !== creatorId)));
 
@@ -260,7 +268,9 @@ export const createGroupChat = async (req, res) => {
         users: uniqueParticipants,
         groupAdmin: creatorId,
         description: description || "",
-        groupAvatar: avatarUrl
+        groupAvatar: avatarUrl,
+        encryptedGroupKeys: encryptedGroupKeys || [],
+        groupKeyVersion: 1
       });
     } catch (dbError) {
       if (uploadRes && uploadRes.public_id) {
@@ -391,7 +401,7 @@ export const addToGroup = async (req, res) => {
     const validation = groupMembershipSchema.safeParse(req.body);
     if (!validation.success) return res.status(400).json({ message: validation.error.issues[0].message });
 
-    const { chatId, userId } = validation.data;
+    const { chatId, userId, encryptedKey, iv, keyVersion } = validation.data;
     if (!mongoose.Types.ObjectId.isValid(chatId) || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid ID format" });
     }
@@ -425,9 +435,23 @@ export const addToGroup = async (req, res) => {
       return res.status(403).json({ message: "You do not have permission to add this user due to privacy restrictions." });
     }
 
+    const updateQuery = {
+      $addToSet: { users: userId }
+    };
+    if (encryptedKey && iv) {
+      updateQuery.$push = {
+        encryptedGroupKeys: {
+          userId,
+          encryptedKey,
+          iv,
+          keyVersion: keyVersion || chat.groupKeyVersion || 1
+        }
+      };
+    }
+
     const updatedChat = await Chat.findByIdAndUpdate(
       chatId,
-      { $addToSet: { users: userId } },
+      updateQuery,
       { returnDocument: "after" }
     ).populate("users", "-password").populate("groupAdmin", "-password");
 
@@ -462,6 +486,9 @@ export const removeFromGroup = async (req, res) => {
     if (userId === req.user._id.toString()) return res.status(400).json({ message: "Admin must use leave group option" });
 
     chat.users = chat.users.filter(user => user.toString() !== userId);
+    if (chat.encryptedGroupKeys) {
+      chat.encryptedGroupKeys = chat.encryptedGroupKeys.filter(k => k.userId.toString() !== userId);
+    }
     await chat.save();
 
     const removedUser = await User.findById(userId);
@@ -534,6 +561,9 @@ export const leaveGroup = async (req, res) => {
 
     // Remove user
     chat.users = chat.users.filter(user => user.toString() !== userIdStr);
+    if (chat.encryptedGroupKeys) {
+      chat.encryptedGroupKeys = chat.encryptedGroupKeys.filter(k => k.userId.toString() !== userIdStr);
+    }
 
     // Admin transfer logic
     if (wasAdmin) {
@@ -765,6 +795,58 @@ export const promoteToAdmin = async (req, res) => {
     res.status(200).json(updatedChat);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// =====================================
+// ROTATE GROUP KEYS (E2EE)
+// PUT /api/chat/group/:chatId/keys/rotate
+// =====================================
+export const rotateGroupKeys = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: "Invalid chat ID format" });
+    }
+
+    const { encryptedGroupKeys } = req.body;
+    if (!Array.isArray(encryptedGroupKeys) || encryptedGroupKeys.length === 0) {
+      return res.status(400).json({ message: "encryptedGroupKeys is required and must be a non-empty array" });
+    }
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) return res.status(404).json({ message: "Group chat not found" });
+    if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+
+    // Verify calling user is a member of the group
+    const isMember = chat.users.some(u => String(u) === String(req.user._id));
+    if (!isMember) {
+      return res.status(403).json({ message: "Not authorized to update keys for this group" });
+    }
+
+    // Update the encrypted group keys and increment groupKeyVersion
+    chat.encryptedGroupKeys = encryptedGroupKeys.map(k => ({
+      userId: k.userId,
+      encryptedKey: k.encryptedKey,
+      iv: k.iv,
+      keyVersion: k.keyVersion || (chat.groupKeyVersion + 1)
+    }));
+    chat.groupKeyVersion = (chat.groupKeyVersion || 1) + 1;
+
+    await chat.save();
+
+    const updatedChat = await Chat.findById(chatId)
+      .populate("users", "-password")
+      .populate("groupAdmin", "-password");
+
+    // Broadcast the group update to notify all members of the rotated keys
+    const io = getIO();
+    io.to(chatId).emit("group_updated", updatedChat);
+
+    res.status(200).json(updatedChat);
+  } catch (error) {
+    console.error("Rotate Group Keys Error:", error);
+    res.status(500).json({ message: "Internal server error during group key rotation" });
   }
 };
 

@@ -22,6 +22,16 @@ const messageSchema = new mongoose.Schema(
       trim: true
     },
 
+    // E2EE fields
+    iv: {
+      type: String,
+      default: null
+    },
+    isEncrypted: {
+      type: Boolean,
+      default: false
+    },
+
     // MEDIA SUPPORT
     messageType: {
       type: String,

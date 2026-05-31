@@ -64,6 +64,15 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
     }],
+
+    // 🔒 E2EE Group Key Management
+    encryptedGroupKeys: [{
+      userId:       { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      encryptedKey: { type: String, required: true },   // GroupKey encrypted with ECDH shared secret
+      iv:           { type: String, required: true },
+      keyVersion:   { type: Number, default: 1 }        // Rotation index
+    }],
+    groupKeyVersion: { type: Number, default: 1 }       // Incremented on member removal
   },
   { timestamps: true }
 );

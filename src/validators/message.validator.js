@@ -15,6 +15,8 @@ export const sendMessageSchema = z.object({
   // duration: accept string (e.g. "0:12") or number (seconds) from APK
   duration: z.union([z.string(), z.number()]).optional().nullable(),
   isForwarded: z.boolean().optional(),
+  iv: z.string().optional().nullable(),
+  isEncrypted: z.boolean().optional(),
   replyTo: z.string()
     .refine(val => val === "" || objectIdRegex.test(val), {
       message: "Invalid replyTo ID format"

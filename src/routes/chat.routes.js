@@ -11,7 +11,8 @@ import {
   removeFromGroup,
   leaveGroup,
   deleteChat,
-  promoteToAdmin
+  promoteToAdmin,
+  rotateGroupKeys
 } from "../controllers/chat.controller.js";
 
 const router = express.Router();
@@ -35,6 +36,7 @@ router.put("/group/add", protect, addToGroup);
 router.put("/group/remove", protect, removeFromGroup);
 router.put("/group/leave", protect, leaveGroup);
 router.put("/group/promote", protect, promoteToAdmin);
+router.put("/group/:chatId/keys/rotate", protect, rotateGroupKeys);
 router.delete("/:chatId", protect, deleteChat);
 
 export default router;

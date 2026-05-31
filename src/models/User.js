@@ -7,6 +7,21 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     phone: { type: String, unique: true, sparse: true },
     password: { type: String, required: true },
+    authSalt: { type: String, default: null }, // PBKDF2 salt for login authentication
+
+    // E2EE Key Management
+    e2ee: {
+      publicKey: { type: String, default: null }, // ECDH P-256 Public Key (Hex)
+      encryptedPrivateKey: { type: String, default: null, select: false }, // AES-GCM encrypted private key
+      keySalt: { type: String, default: null, select: false }, // Salt used to derive the KEK
+      keyIv: { type: String, default: null, select: false }, // IV for encrypted private key
+      keyVersion: { type: Number, default: 1 }, // Version of key wrapping
+      
+      // Recovery Vault
+      recoveryEncryptedKey: { type: String, default: null, select: false }, // Encrypted with recovery mnemonic
+      recoveryKeyIv: { type: String, default: null, select: false },
+      recoveryEnabled: { type: Boolean, default: false }
+    },
 
     // 🔥 Root Data Fields
     profilePic: { type: String, default: "" },

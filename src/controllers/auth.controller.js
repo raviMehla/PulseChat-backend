@@ -1,9 +1,48 @@
+import crypto from "crypto";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema, sendRegistrationOtpSchema, verifyRegistrationOtpSchema } from "../validators/auth.validator.js";
 import User from "../models/User.js";
 import { hashPassword, comparePassword } from "../utils/hashPassword.js";
 import { generateToken } from "../services/token.service.js";
 import { sendPasswordResetOTP, sendRegistrationOTP } from "../services/email.service.js";
 import jwt from "jsonwebtoken";
+
+// ==========================
+// GET SALTS
+// GET /api/auth/salts
+// Query: ?identifier=...
+// ==========================
+export const getSalts = async (req, res) => {
+  try {
+    const { identifier } = req.query;
+
+    if (identifier) {
+      const normalizedIdentifier = identifier.toLowerCase().trim();
+      const user = await User.findOne({
+        $or: [
+          { email: normalizedIdentifier },
+          { username: normalizedIdentifier },
+          { phone: normalizedIdentifier }
+        ]
+      }).select("+authSalt +e2ee.keySalt");
+
+      if (user && user.authSalt && user.e2ee && user.e2ee.keySalt) {
+        return res.status(200).json({
+          authSalt: user.authSalt,
+          keySalt: user.e2ee.keySalt
+        });
+      }
+    }
+
+    // Generate random salts (either for new registration or as dummy for non-existent users)
+    const authSalt = crypto.randomBytes(16).toString("hex");
+    const keySalt = crypto.randomBytes(16).toString("hex");
+
+    res.status(200).json({ authSalt, keySalt });
+  } catch (error) {
+    console.error("GetSalts Error:", error);
+    res.status(500).json({ message: "Failed to retrieve encryption parameters" });
+  }
+};
 
 // ==========================
 // IN-MEMORY STORE: Registration OTPs
@@ -111,7 +150,7 @@ export const verifyRegistrationOtp = async (req, res) => {
 // ==========================
 // REGISTER USER — Step 3
 // POST /api/auth/register
-// Body: { name, username, password, emailVerifiedToken }
+// Body: { name, username, authToken, emailVerifiedToken, authSalt, keySalt, publicKey, encryptedPrivateKey, keyIv, recoveryEncryptedKey, recoveryKeyIv }
 // ==========================
 export const registerUser = async (req, res) => {
   try {
@@ -123,7 +162,19 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    const { name, username, password, emailVerifiedToken } = validation.data;
+    const { 
+      name, 
+      username, 
+      authToken, 
+      emailVerifiedToken, 
+      authSalt, 
+      keySalt, 
+      publicKey, 
+      encryptedPrivateKey, 
+      keyIv, 
+      recoveryEncryptedKey, 
+      recoveryKeyIv 
+    } = validation.data;
 
     // 🛡️ Verify the emailVerifiedToken to extract the email
     let verifiedEmail;
@@ -149,14 +200,23 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Username already taken. Please choose another." });
     }
 
-    const hashedPassword = await hashPassword(password);
+    const hashedPassword = await hashPassword(authToken);
 
     const user = await User.create({
       name,
       username,
       email: verifiedEmail,  // Always use the email from the verified JWT, not raw input
-      password: hashedPassword,
-      // tokenVersion defaults to 0 via schema
+      password: hashedPassword, // Stores bcrypt(authToken)
+      authSalt,
+      e2ee: {
+        publicKey,
+        encryptedPrivateKey,
+        keySalt,
+        keyIv,
+        recoveryEncryptedKey: recoveryEncryptedKey || null,
+        recoveryKeyIv: recoveryKeyIv || null,
+        recoveryEnabled: !!recoveryEncryptedKey
+      }
     });
 
     // 🛡️ SECURITY: Pass tokenVersion to the token generator
@@ -176,7 +236,10 @@ export const registerUser = async (req, res) => {
       settings: user.settings || {},
       about: user.bio || "",
       bio: user.bio || "",
-      isOnline: true
+      isOnline: true,
+      e2ee: {
+        publicKey: user.e2ee.publicKey
+      }
     });
 
   } catch (error) {
@@ -197,19 +260,20 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: errorMsg });
     }
     
-    const { identifier, password } = validation.data;
+    const { identifier, authToken } = validation.data;
 
     // Pre-computed bcrypt hash of "dummy_password" with 10 salt rounds to match standard cost
     const DUMMY_HASH = "$2a$10$Kwy34S/Xv2e.Gk3Gg8g4v.Oa94uY78t9y1u2i3o4p5a6s7d8f9g0h";
 
     // identifier = email OR username OR phone
+    // We explicitly select +password and +e2ee fields since they are marked select: false in the schema
     const user = await User.findOne({
       $or: [
         { email: identifier },
         { username: identifier },
         { phone: identifier }
       ]
-    });
+    }).select("+password +e2ee.encryptedPrivateKey +e2ee.keyIv +e2ee.keySalt");
 
     // 🛡️ SECURITY: Lockout Check
     if (user && user.lockUntil && user.lockUntil > Date.now()) {
@@ -221,10 +285,10 @@ export const loginUser = async (req, res) => {
 
     let isMatch = false;
     if (user) {
-      isMatch = await comparePassword(password, user.password);
+      isMatch = await comparePassword(authToken, user.password);
     } else {
       // Execute dummy check to prevent timing side-channel attacks
-      await comparePassword(password, DUMMY_HASH);
+      await comparePassword(authToken, DUMMY_HASH);
     }
 
     if (!user || !isMatch) {
@@ -276,7 +340,13 @@ export const loginUser = async (req, res) => {
       about: user.bio || "",
       bio: user.bio || "",
       isOnline: true,
-      lastSeen: user.lastSeen
+      lastSeen: user.lastSeen,
+      e2ee: {
+        publicKey: user.e2ee?.publicKey || null,
+        encryptedPrivateKey: user.e2ee?.encryptedPrivateKey || null,
+        keyIv: user.e2ee?.keyIv || null,
+        keySalt: user.e2ee?.keySalt || null
+      }
     });
 
   } catch (error) {
@@ -328,7 +398,7 @@ export const forgotPassword = async (req, res) => {
 // ==========================
 // RESET PASSWORD — Step 2: Verify OTP & Set New Password
 // POST /api/auth/reset-password
-// Body: { email, otp, newPassword }
+// Body: { email, otp, newAuthToken, newAuthSalt, newKeySalt, newKeyIv, newEncryptedPrivateKey, newRecoveryEncryptedKey, newRecoveryKeyIv }
 // ==========================
 export const resetPassword = async (req, res) => {
   try {
@@ -337,7 +407,17 @@ export const resetPassword = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0].message });
     }
 
-    const { email, otp, newPassword } = validation.data;
+    const { 
+      email, 
+      otp, 
+      newAuthToken, 
+      newAuthSalt, 
+      newKeySalt, 
+      newKeyIv, 
+      newEncryptedPrivateKey, 
+      newRecoveryEncryptedKey, 
+      newRecoveryKeyIv 
+    } = validation.data;
 
     const user = await User.findOne({ email });
 
@@ -350,12 +430,23 @@ export const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
     }
 
-    // 2️⃣ Hash the new password
-    const hashedPassword = await hashPassword(newPassword);
+    // 2️⃣ Hash the new authToken
+    const hashedPassword = await hashPassword(newAuthToken);
 
-    // 3️⃣ Update password, clear OTP fields, and revoke all existing sessions
+    // 3️⃣ Update password, salts, E2EE key block, clear OTP fields, and revoke all existing sessions
     // Incrementing tokenVersion logs the user out of ALL other devices for security
     user.password = hashedPassword;
+    user.authSalt = newAuthSalt;
+    user.e2ee = {
+      publicKey: user.e2ee?.publicKey || null,
+      encryptedPrivateKey: newEncryptedPrivateKey,
+      keySalt: newKeySalt,
+      keyIv: newKeyIv,
+      keyVersion: (user.e2ee?.keyVersion || 1) + 1,
+      recoveryEncryptedKey: newRecoveryEncryptedKey || null,
+      recoveryKeyIv: newRecoveryKeyIv || null,
+      recoveryEnabled: !!newRecoveryEncryptedKey
+    };
     user.resetPasswordOtp = null;
     user.resetPasswordOtpExpires = null;
     user.tokenVersion = (user.tokenVersion || 0) + 1;
@@ -371,7 +462,13 @@ export const resetPassword = async (req, res) => {
         id: user._id,
         name: user.name,
         username: user.username,
-        email: user.email
+        email: user.email,
+        e2ee: {
+          publicKey: user.e2ee?.publicKey || null,
+          encryptedPrivateKey: user.e2ee?.encryptedPrivateKey || null,
+          keyIv: user.e2ee?.keyIv || null,
+          keySalt: user.e2ee?.keySalt || null
+        }
       }
     });
 

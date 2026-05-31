@@ -32,7 +32,7 @@ export const updateProfileSchema = z.object({
 
 
 export const deleteAccountSchema = z.object({
-  password: z.string().min(6, "Password is required to confirm deletion"),
+  authToken: z.string().length(64, "Auth token is required to confirm deletion"),
   otp: z.string().length(6, "OTP must be exactly 6 digits")
 });
 
@@ -40,8 +40,14 @@ export const deleteAccountSchema = z.object({
 // SECURITY & PRIVACY VALIDATORS
 // ==========================================
 export const updatePasswordSchema = z.object({
-  currentPassword: z.string().min(6, "Current password is required"),
-  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+  currentAuthToken: z.string().length(64, "Current auth token is required"),
+  newAuthToken: z.string().length(64, "New auth token must be a 64-character hex string"),
+  newAuthSalt: z.string().min(1, "New auth salt is required"),
+  newKeySalt: z.string().min(1, "New key salt is required"),
+  newKeyIv: z.string().min(1, "New key IV is required"),
+  newEncryptedPrivateKey: z.string().min(1, "New encrypted private key is required"),
+  newRecoveryEncryptedKey: z.string().optional(),
+  newRecoveryKeyIv: z.string().optional()
 });
 
 export const updatePrivacySchema = z.object({

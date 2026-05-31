@@ -13,7 +13,13 @@ export const createGroupSchema = z.object({
     .max(50, "Group name is too long"),
   users: z.array(z.string().regex(objectIdRegex, "Invalid User ID format"))
     .min(1, "You must select at least 1 user to start a group"),
-  description: z.string().max(250, "Description cannot exceed 250 characters").optional()
+  description: z.string().max(250, "Description cannot exceed 250 characters").optional(),
+  encryptedGroupKeys: z.array(z.object({
+    userId: z.string().regex(objectIdRegex, "Invalid User ID format"),
+    encryptedKey: z.string(),
+    iv: z.string(),
+    keyVersion: z.number().optional()
+  })).optional()
 });
 
 export const searchUserSchema = z.object({
@@ -32,7 +38,10 @@ export const renameGroupSchema = z.object({
 
 export const groupMembershipSchema = z.object({
   chatId: z.string().regex(objectIdRegex, "Invalid Chat ID format"),
-  userId: z.string().regex(objectIdRegex, "Invalid User ID format")
+  userId: z.string().regex(objectIdRegex, "Invalid User ID format"),
+  encryptedKey: z.string().optional(),
+  iv: z.string().optional(),
+  keyVersion: z.number().optional()
 });
 
 export const leaveGroupSchema = z.object({
