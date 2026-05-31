@@ -31,6 +31,7 @@ import messageRoutes from "./routes/message.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import supportRoutes from "./routes/support.routes.js";
 import callRoutes from "./routes/call.routes.js";
+import storyRoutes from "./routes/story.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -139,6 +140,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/call", callRoutes);
+app.use("/api/status", storyRoutes);
 
 // Health Check
 app.get("/", (req, res) => {
