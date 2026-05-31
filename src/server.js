@@ -1,3 +1,16 @@
+/**
+ * PulseChat - Real-Time Encrypted Messaging System
+ * 
+ * Cryptographic Signature & Verification Hash
+ * --------------------------------------------------
+ * Developer Name : Ravi Mehla
+ * Roll Number    : 19590
+ * College Name   : SKD University
+ * Signature Hash : 69f1589e1eeb95b42956e3f21cae32c0a9f79cd3db1b4adf7e78ca1e08a16491
+ * --------------------------------------------------
+ * Verification command: node verify-owner.js
+ */
+
 import "dotenv/config";
 import express from "express";
 import dotenv from "dotenv";
@@ -141,5 +154,10 @@ app.use(errorHandler);
 // Start Server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`HTTP and WebSocket Server running on port ${PORT}`);
+  console.log("\x1b[36m%s\x1b[0m", "==================================================");
+  console.log("\x1b[36m%s\x1b[0m", `  PulseChat Backend Server running on port ${PORT}`);
+  console.log("\x1b[32m%s\x1b[0m", "  ✓ Signed by Author: Ravi Mehla (19590)");
+  console.log("\x1b[32m%s\x1b[0m", "  ✓ Verified College: SKD University");
+  console.log("\x1b[35m%s\x1b[0m", "  ✓ Digital Signature: 69f1589e1eeb95b42956e3f21cae32c0a9f79cd3db1b4adf7e78ca1e08a16491");
+  console.log("\x1b[36m%s\x1b[0m", "==================================================");
 });

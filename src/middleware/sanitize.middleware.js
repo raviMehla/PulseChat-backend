@@ -51,6 +51,18 @@ function sanitizeObject(obj) {
 }
 
 /**
+ * Mutates an object in place to preserve its reference (essential for req.query/req.params getters)
+ */
+function sanitizeInPlace(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  const sanitized = sanitizeObject(obj);
+  for (const key of Object.keys(obj)) {
+    delete obj[key];
+  }
+  Object.assign(obj, sanitized);
+}
+
+/**
  * Express middleware — sanitizes req.body, req.query, req.params
  */
 export const sanitizeInputs = (req, _res, next) => {
@@ -59,11 +71,11 @@ export const sanitizeInputs = (req, _res, next) => {
   }
 
   if (req.query && typeof req.query === 'object') {
-    req.query = sanitizeObject(req.query);
+    sanitizeInPlace(req.query);
   }
 
   if (req.params && typeof req.params === 'object') {
-    req.params = sanitizeObject(req.params);
+    sanitizeInPlace(req.params);
   }
 
   next();
