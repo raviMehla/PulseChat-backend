@@ -149,7 +149,8 @@ export const sendMessage = async (req, res) => {
       sanitizedMessage.chat.users = sanitizedMessage.chat.users.map(u => ({
         _id: u._id,
         name: u.name,
-        username: u.username
+        username: u.username,
+        e2ee: u.e2ee
       }));
     }
 
@@ -330,7 +331,8 @@ export const sendMediaMessage = async (req, res) => {
       sanitizedMessage.chat.users = sanitizedMessage.chat.users.map(u => ({
         _id: u._id,
         name: u.name,
-        username: u.username
+        username: u.username,
+        e2ee: u.e2ee
       }));
     }
 
