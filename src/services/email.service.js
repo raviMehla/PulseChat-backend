@@ -224,11 +224,11 @@ export const sendInvitationEmail = async (toEmail, inviterName) => {
           <p><strong>${inviterName}</strong> has invited you to join them on <strong>PulseChat</strong>, a modern real-time secure messaging app.</p>
           <p>Click the button below to sign up and start chatting:</p>
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${frontendUrl}/signup" style="background-color: #7C6EF7; color: #fff; text-decoration: none; padding: 12px 24px; font-weight: bold; border-radius: 4px; border: none; display: inline-block;">
+            <a href="${frontendUrl}/landing" style="background-color: #7C6EF7; color: #fff; text-decoration: none; padding: 12px 24px; font-weight: bold; border-radius: 4px; border: none; display: inline-block;">
               Join PulseChat
             </a>
           </div>
-          <p style="color: #aaa; font-size: 12px; margin-top: 20px;">If the button doesn't work, copy and paste this link in your browser: <br/> ${frontendUrl}/signup</p>
+          <p style="color: #aaa; font-size: 12px; margin-top: 20px;">If the button doesn't work, copy and paste this link in your browser: <br/> ${frontendUrl}/landing</p>
           <p style="color: #555; font-size: 11px; margin-top: 30px;">Sent from PulseChat Invitation Service</p>
         </div>
       `
