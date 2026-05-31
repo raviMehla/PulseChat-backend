@@ -94,16 +94,16 @@ export const sendMessage = async (req, res) => {
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
-      .populate("sender", "name username email")
+      .populate("sender", "name username email e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username e2ee" }
       })
       .populate({
         path: "chat",
-        populate: { path: "users", select: "_id name username email fcmTokens" } 
+        populate: { path: "users", select: "_id name username email fcmTokens e2ee" } 
       });
 
     // 🛡️ LEVEL 10 FIX: Prevent same-millisecond race conditions using ObjectId chronology check
@@ -276,16 +276,16 @@ export const sendMediaMessage = async (req, res) => {
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
-      .populate("sender", "name username email")
+      .populate("sender", "name username email e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username e2ee" }
       })
       .populate({
         path: "chat",
-        populate: { path: "users", select: "_id name username email fcmTokens" }
+        populate: { path: "users", select: "_id name username email fcmTokens e2ee" }
       });
 
     // 🛡️ LEVEL 10 FIX: Prevent same-millisecond race conditions using ObjectId chronology check
@@ -472,12 +472,12 @@ export const getMessages = async (req, res) => {
     const messages = await Message.find(query)
       .sort({ createdAt: -1 }) 
       .limit(limit)
-      .populate("sender", "name username email")
+      .populate("sender", "name username email e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username" }
+        populate: { path: "sender", select: "name username e2ee" }
       });
 
     const orderedMessages = messages.reverse();
@@ -600,7 +600,7 @@ export const searchMessages = async (req, res) => {
       content: { $regex: validation.data.query, $options: "i" }
     })
       .select("_id content createdAt sender") 
-      .populate("sender", "name username")
+      .populate("sender", "name username e2ee")
       .sort({ createdAt: -1 }) 
       .limit(50); 
 
@@ -626,12 +626,12 @@ export const getMessageContext = async (req, res) => {
     if (!chatDoc) return;
 
     const targetMessage = await Message.findById(messageId)
-      .populate("sender", "name username profilePic")
+      .populate("sender", "name username profilePic e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username profilePic" }
+        populate: { path: "sender", select: "name username profilePic e2ee" }
       });
 
     if (!targetMessage) return res.status(404).json({ message: "Target message not found" });
@@ -645,12 +645,12 @@ export const getMessageContext = async (req, res) => {
     })
       .sort({ _id: -1 })
       .limit(15)
-      .populate("sender", "name username profilePic")
+      .populate("sender", "name username profilePic e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username profilePic" }
+        populate: { path: "sender", select: "name username profilePic e2ee" }
       });
 
     const newerMessages = await Message.find({
@@ -659,12 +659,12 @@ export const getMessageContext = async (req, res) => {
     })
       .sort({ _id: 1 })
       .limit(15)
-      .populate("sender", "name username profilePic")
+      .populate("sender", "name username profilePic e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username profilePic" }
+        populate: { path: "sender", select: "name username profilePic e2ee" }
       });
 
     const contextSlice = [
@@ -717,12 +717,12 @@ export const editMessage = async (req, res) => {
     await message.save();
 
     const populatedMessage = await Message.findById(message._id)
-      .populate("sender", "name username profilePic")
+      .populate("sender", "name username profilePic e2ee")
       .populate({
         path: "replyTo",
         strictPopulate: false,
         select: "content messageType fileUrl fileName sender isDeleted",
-        populate: { path: "sender", select: "name username profilePic" }
+        populate: { path: "sender", select: "name username profilePic e2ee" }
       });
 
     const io = getIO();
@@ -818,11 +818,11 @@ export const getStarredMessages = async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .limit(200)
-      .populate("sender", "name username profilePic")
+      .populate("sender", "name username profilePic e2ee")
       .populate({
         path: "chat",
         select: "chatName isGroup users",
-        populate: { path: "users", select: "_id name username" }
+        populate: { path: "users", select: "_id name username e2ee" }
       })
       .lean();
 
