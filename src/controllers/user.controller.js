@@ -1,7 +1,7 @@
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
-import { sendDeletionOTP } from "../services/email.service.js"; // 🟢 Genuine SMTP Service
+import { sendDeletionOTP, sendInvitationEmail } from "../services/email.service.js"; // 🟢 Genuine SMTP Service
 import cloudinary from "../config/cloudinary.js";
 import streamifier from "streamifier";
 import { getIO } from "../socket.js";
@@ -108,13 +108,27 @@ export const updateProfile = async (req, res) => {
 
     const { name, bio, about, phone, settings } = validation.data;
     const updatePayload = Object.create(null);
+    const unsetPayload = Object.create(null);
 
     // 2️⃣ Map validated text fields
     if (name) updatePayload.name = name;
     // Accept 'bio' (web) or 'about' (mobile APK) — both map to the same DB field
     if (bio !== undefined) updatePayload.bio = bio;
     else if (about !== undefined) updatePayload.bio = about;
-    if (phone !== undefined) updatePayload.phone = phone;
+    
+    if (phone !== undefined) {
+      if (phone === null || phone.trim() === "") {
+        unsetPayload.phone = "";
+      } else {
+        const trimmedPhone = phone.trim();
+        const existingPhoneUser = await User.findOne({ phone: trimmedPhone, _id: { $ne: req.user._id } });
+        if (existingPhoneUser) {
+          return res.status(400).json({ message: "Phone number is already in use by another account" });
+        }
+        updatePayload.phone = trimmedPhone;
+      }
+    }
+
     if (settings) {
       if (settings.theme) updatePayload["settings.theme"] = settings.theme;
       if (settings.notificationsEnabled !== undefined) {
@@ -141,9 +155,13 @@ export const updateProfile = async (req, res) => {
     }
 
     // 4️⃣ Database Execution
+    const updateQuery = {};
+    if (Object.keys(updatePayload).length > 0) updateQuery.$set = updatePayload;
+    if (Object.keys(unsetPayload).length > 0) updateQuery.$unset = unsetPayload;
+
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { $set: updatePayload },
+      updateQuery,
       { returnDocument: "after", runValidators: true }
     ).select("-password").populate("blockedUsers", "_id name username profilePic");
 
@@ -497,5 +515,38 @@ export const deleteAccount = async (req, res) => {
   } catch (error) {
     console.error("Account Deletion Error:", error);
     res.status(500).json({ message: "Fatal error during account deletion" });
+  }
+};
+
+// =====================================
+// INVITE USER
+// =====================================
+export const inviteUser = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    // Check if the user is already signed up
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({ message: "This user is already signed up on PulseChat" });
+    }
+
+    // Send the email invitation
+    const inviterName = req.user.name || req.user.username;
+    await sendInvitationEmail(email.toLowerCase(), inviterName);
+
+    res.status(200).json({ message: "Invitation sent successfully" });
+  } catch (error) {
+    console.error("Invite User Error:", error);
+    res.status(500).json({ message: "Failed to send invitation", error: error.message });
   }
 };

@@ -11,6 +11,7 @@ import {
   toggleBlockUser,
   getUserStatus,
   searchUsers,
+  inviteUser,
   registerFcmToken,
   removeFcmToken,
   exportUserData, requestDeleteOtp, deleteAccount
@@ -49,6 +50,7 @@ router.put("/block", toggleBlockUser);
 // ==========================================
 // Note: Put /search before /status/:id so Express doesn't treat "search" as an ID
 router.get("/search", searchUsers);
+router.post("/invite", inviteUser);
 router.get("/status/:id", getUserStatus);
 
 // ==========================================

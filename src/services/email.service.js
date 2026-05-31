@@ -203,3 +203,56 @@ export const sendSupportTicketEmail = async ({ ticketId, category, description, 
     throw error;
   }
 };
+
+// ==========================================
+// SEND INVITATION EMAIL
+// ==========================================
+export const sendInvitationEmail = async (toEmail, inviterName) => {
+  try {
+    const frontendUrl = process.env.FRONTEND_URL || "https://go-pulsechat.vercel.app";
+    const payload = {
+      sender: {
+        email: process.env.EMAIL_USER,
+        name: 'PulseChat'
+      },
+      to: [{ email: toEmail }],
+      subject: `${inviterName} invited you to join PulseChat`,
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #333; border-radius: 8px; background-color: #111; color: #eee;">
+          <h2 style="color: #7C6EF7; border-bottom: 1px solid #333; padding-bottom: 10px;">You've Been Invited to PulseChat!</h2>
+          <p>Hi there,</p>
+          <p><strong>${inviterName}</strong> has invited you to join them on <strong>PulseChat</strong>, a modern real-time secure messaging app.</p>
+          <p>Click the button below to sign up and start chatting:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${frontendUrl}/signup" style="background-color: #7C6EF7; color: #fff; text-decoration: none; padding: 12px 24px; font-weight: bold; border-radius: 4px; border: none; display: inline-block;">
+              Join PulseChat
+            </a>
+          </div>
+          <p style="color: #aaa; font-size: 12px; margin-top: 20px;">If the button doesn't work, copy and paste this link in your browser: <br/> ${frontendUrl}/signup</p>
+          <p style="color: #555; font-size: 11px; margin-top: 30px;">Sent from PulseChat Invitation Service</p>
+        </div>
+      `
+    };
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Brevo rejected invite email: ${errorData.message}`);
+    }
+
+    console.log(`✅ Invitation email sent to ${toEmail} via Brevo.`);
+    return true;
+  } catch (error) {
+    console.error('Invitation Email Failed:', error.message);
+    throw error;
+  }
+};
