@@ -37,7 +37,7 @@ export const sendMessage = async (req, res) => {
       return res.status(400).json({ message: validation.error.issues[0].message });
     }
 
-    const { content, chatId, replyTo } = validation.data;
+    const { content, chatId, replyTo, messageType, fileUrl, fileName, duration, isForwarded } = validation.data;
     const senderId = req.user._id;
 
     // 1️⃣ Verify membership (replaces manual Chat.findById + not-found check)
@@ -84,7 +84,11 @@ export const sendMessage = async (req, res) => {
       content,
       chat: chatId,
       replyTo: safeReplyTo,
-      isForwarded: req.body.isForwarded === true
+      messageType: messageType || "text",
+      fileUrl: fileUrl || null,
+      fileName: fileName || null,
+      duration: duration || null,
+      isForwarded: isForwarded === true
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
@@ -134,7 +138,7 @@ export const sendMessage = async (req, res) => {
     }
     
     // 🔥 Abstracted Service Call - executed before stripping fcmTokens/emails
-    sendPushNotification(populatedMessage.chat, req.user, content, "text");
+    sendPushNotification(populatedMessage.chat, req.user, content, messageType || "text");
 
     // 🛡️ LEVEL 11 FIX: Sanitize message payload to prevent sensitive data leaks (emails, fcmTokens)
     const sanitizedMessage = populatedMessage.toObject();
