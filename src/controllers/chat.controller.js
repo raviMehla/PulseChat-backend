@@ -87,7 +87,7 @@ const createSystemMessage = async (chatId, text, session = null) => {
   }
 };
 
-const lastMessageFields = "content messageType fileUrl fileName isDeleted sender createdAt";
+const lastMessageFields = "content messageType fileUrl fileName isDeleted sender createdAt iv isEncrypted";
 
 // =====================================
 // ACCESS OR CREATE 1-TO-1 CHAT
